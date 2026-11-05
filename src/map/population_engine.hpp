@@ -64,6 +64,8 @@ void population_engine_on_shell_damaged(map_session_data *sd, struct block_list 
 /// Called after a population shell kills a real (non-shell) player. Shell may trash-talk.
 void population_engine_on_shell_kills_player(map_session_data *killer_sd, map_session_data *victim_sd);
 size_t population_engine_get_count();
+/// nostalRE: one chat line for each shell on the map: level, stats and worn gear (@populate levels).
+void population_engine_report_levels(int fd, int16_t map_id);
 /// Stop combat mode for a population shell (teardown hat effect, cleanup, set state=false).
 /// Safe to call even if not in combat. Used by clif quit/restart paths.
 void population_engine_combat_shell_stop(map_session_data *sd);

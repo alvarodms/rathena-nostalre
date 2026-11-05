@@ -82,6 +82,7 @@ int32 population_engine_autosummon_batch_size;
 /// AI behavior bitmask (like monster_ai). See conf/battle/population_engine.conf for flag docs.
 int32 population_engine_ai;
 int32 population_engine_enable; // nostalRE: master switch
+int32 population_engine_map_levels; // nostalRE: autosummoned shells take their level from their map
 int32 population_engine_demand_spawn; // nostalRE: shells only on maps a player is on
 int32 population_engine_demand_grace_ms; // nostalRE: keep a vacated map's shells this long
 int32 population_engine_density_pct; // nostalRE: scales spawn table counts

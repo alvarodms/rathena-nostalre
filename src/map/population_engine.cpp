@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cctype>
 #include <cinttypes>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <set>
@@ -181,6 +182,194 @@ static int16_t population_roll_closed_range(int16_t a, int16_t b)
 		std::swap(a, b);
 	const uint32_t span = static_cast<uint32_t>(b - a) + 1u;
 	return static_cast<int16_t>(a + static_cast<int32_t>(rnd() % span));
+}
+
+// ---- nostalRE: map levels -------------------------------------------------
+// Autosummoned shells take their level from the map they spawn on, so a beginner field
+// holds low bots and Glast Heim high ones. Switch: population_engine_map_levels.
+// Arena and @populate shells keep the profile's range (or 99/70).
+
+/// Level of a map's monsters: mean of its permanent spawns, weighted by count, without
+/// bosses, MVPs and things that cannot attack (plants, eggs), which say little about who
+/// hunts there. 0 = no such spawns.
+///
+/// map_data::moblist holds every permanent spawn as long as dynamic_mobs is on (it is, in
+/// conf/battle/monster.conf) and the map has at most MAX_MOB_LIST_PER_MAP spawn lines (the
+/// busiest map has 94). Scripted `monster` commands are not spawns and are not in it.
+static int32_t population_map_mob_level(int16_t map_id)
+{
+	static std::unordered_map<int16_t, int32_t> cache;
+	const auto cached = cache.find(map_id);
+	if (cached != cache.end())
+		return cached->second;
+
+	const struct map_data* mapdata = map_getmapdata(map_id);
+	uint64_t level_sum = 0, count = 0;
+	for (int32 i = 0; mapdata != nullptr && i < MAX_MOB_LIST_PER_MAP; i++) {
+		const spawn_data* spawn = mapdata->moblist[i];
+		if (spawn == nullptr || spawn->state.boss)
+			continue;
+		const std::shared_ptr<s_mob_db> mob = mob_db.find(spawn->id);
+		if (mob == nullptr || mob->get_bosstype() != BOSSTYPE_NONE || !status_has_mode(&mob->status, MD_CANATTACK))
+			continue;
+		level_sum += static_cast<uint64_t>(spawn->level > 0 ? spawn->level : mob->lv) * spawn->num;
+		count += spawn->num;
+	}
+	const int32_t level = count > 0 ? static_cast<int32_t>((level_sum + count / 2) / count) : 0;
+	cache[map_id] = level;
+	if (mapdata != nullptr)
+		ShowInfo("Population engine: map '%s' has monster level %d (%" PRIu64 " monsters).\n", mapdata->name, level, count);
+	return level;
+}
+
+/// Roll a shell's base and job level for a map.
+///
+/// `map_category` 1 (town) and fields or dungeons with no monsters use a broad range:
+/// towns are where everybody meets. Niflheim counts as a town though it has monsters.
+/// Otherwise the roll is around the map's monster level.
+/// Then the class decides: a Knight needs a first job behind them, so on a Poring field
+/// they are a low Knight, not a level 3 one; first classes stop at 70, Novices at 15.
+static void population_roll_map_levels(uint16_t job_id, int16_t map_id, uint8_t map_category, int16_t& base_level, int16_t& job_level)
+{
+	static constexpr int32_t TOWN_LEVEL_MIN = 30, TOWN_LEVEL_MAX = 85, TOWN_LEVEL_SPREAD = 12;
+	const uint64 mapid = pc_jobid2mapid(job_id);
+	const int32_t max_base = static_cast<int32_t>(job_db.get_maxBaseLv(job_id));
+	const int32_t max_job = std::max(1, static_cast<int32_t>(job_db.get_maxJobLv(job_id)));
+	const uint64 base_class = mapid & MAPID_FIRSTMASK;
+
+	int32_t floor_level, cap;
+	if (mapid & JOBL_THIRD) {
+		floor_level = 99; cap = max_base;
+	} else if (mapid & JOBL_2) {
+		floor_level = (mapid & JOBL_UPPER) ? 60 : 45; cap = max_base;
+	} else if (base_class == MAPID_NOVICE) {
+		floor_level = 1; cap = 15;
+	} else if (base_class == MAPID_GUNSLINGER || base_class == MAPID_NINJA) {
+		floor_level = 10; cap = max_base; // no second class to move on to
+	} else {
+		floor_level = 10; cap = 70;
+	}
+	cap = std::min(cap, max_base);
+	floor_level = std::min(floor_level, cap);
+
+	const int32_t map_level = map_category == 1 ? 0 : population_map_mob_level(map_id);
+	int32_t lo, hi, spread;
+	if (map_level > 0) {
+		spread = std::max(3, map_level / 10);
+		lo = map_level - spread;
+		hi = map_level + spread;
+	} else {
+		spread = TOWN_LEVEL_SPREAD;
+		lo = TOWN_LEVEL_MIN;
+		hi = TOWN_LEVEL_MAX;
+	}
+	hi = std::min(std::max(hi, floor_level + spread), cap);
+	lo = std::max(std::min(lo, hi - spread), floor_level);
+	const int32_t base = std::max<int32_t>(population_roll_closed_range(static_cast<int16_t>(lo), static_cast<int16_t>(hi)), 1);
+
+	// Job levels come fast early on, hence the root: a level 60 Knight (range 45-99) is about job 26.
+	const double progress = cap > floor_level ? static_cast<double>(base - floor_level) / (cap - floor_level) : 1.0;
+	const int32_t jitter = max_job / 10;
+	const int32_t job = 1 + static_cast<int32_t>(std::sqrt(progress) * (max_job - 1))
+		+ population_roll_closed_range(static_cast<int16_t>(-jitter), static_cast<int16_t>(jitter));
+
+	base_level = static_cast<int16_t>(base);
+	job_level = static_cast<int16_t>(cap_value(job, 1, max_job));
+}
+
+/// Can a shell of this level wear the item? pc_equipitem refuses it otherwise, and the slot stays empty.
+static bool population_item_fits_level(uint16_t nameid, int32_t level)
+{
+	if (nameid == 0)
+		return true;
+	const std::shared_ptr<item_data> id = item_db.find(nameid);
+	return id != nullptr && level >= id->elv && (id->elvmax == 0 || level <= id->elvmax);
+}
+
+/// Pick from a gear pool. Only items wearable at `level`, unless `level` is negative (no map levels).
+static uint16_t population_pick_gear(const std::vector<uint16_t>& pool, int32_t level)
+{
+	if (pool.empty())
+		return 0;
+	if (level < 0)
+		return pool.size() == 1 ? pool[0] : pool[rnd() % pool.size()];
+	std::vector<uint16_t> wearable;
+	wearable.reserve(pool.size());
+	for (uint16_t nameid : pool) {
+		if (population_item_fits_level(nameid, level))
+			wearable.push_back(nameid);
+	}
+	return wearable.empty() ? 0 : wearable[rnd() % wearable.size()];
+}
+
+/// Weapon for a shell too low for its whole weapon pool: the plainest of the same kind,
+/// because the gear sets start at level 18-26 and a bare-handed Archer looks broken.
+static uint16_t population_starter_weapon(const std::vector<uint16_t>& pool, int32_t level)
+{
+	if (pool.empty())
+		return 0;
+	const std::shared_ptr<item_data> id = item_db.find(pool[0]);
+	if (id == nullptr || id->type != IT_WEAPON)
+		return 0;
+	uint16_t starter = 0;
+	switch (id->subtype) {
+		case W_DAGGER:   starter = 1201; break; // Knife
+		case W_1HSWORD:
+		case W_2HSWORD:  starter = 1101; break; // Sword
+		case W_MACE:     starter = 1501; break; // Club
+		case W_STAFF:
+		case W_2HSTAFF:  starter = 1601; break; // Rod
+		case W_BOW:      starter = 1701; break; // Bow
+		case W_REVOLVER: starter = 13100; break; // Six Shooter
+		default: break;
+	}
+	return population_item_fits_level(starter, level) ? starter : 0;
+}
+
+/// Fit a stat rolled for a profile's level range to the level the shell got, since a level
+/// 10 Knight with 80 STR could not exist. Profiles with no stats have no range to scale,
+/// so they get an even spread a character of that level could afford.
+static uint16_t population_scale_stat(uint16_t rolled, int32_t level, const PopulationEngine* pop_cfg, bool has_stat_range)
+{
+	int32_t stat;
+	if (has_stat_range) {
+		const int32_t ref_lo = (pop_cfg != nullptr && pop_cfg->base_level_min >= 0) ? pop_cfg->base_level_min : 99;
+		const int32_t ref_hi = (pop_cfg != nullptr && pop_cfg->base_level_max >= 0) ? pop_cfg->base_level_max : ref_lo;
+		stat = rolled * level / std::max(1, (ref_lo + ref_hi) / 2);
+	} else {
+		stat = population_roll_closed_range(static_cast<int16_t>(5 + level * 2 / 5), static_cast<int16_t>(5 + level * 3 / 5));
+	}
+	return static_cast<uint16_t>(cap_value(stat, 1, 99));
+}
+
+/// Points to raise a stat from 1, the same steps as pc_need_status_point up to 99.
+static int32_t population_stat_cost(int32_t stat)
+{
+	int32_t cost = 0;
+	for (int32_t value = 1; value < stat; value++)
+		cost += 2 + (value - 1) / 10;
+	return cost;
+}
+
+/// Shrink the six stats evenly until they cost no more than a character of this level has
+/// (db/re/statpoint.yml). The profile ranges alone do not guarantee it: they run to 2-3 times
+/// that, which makes low bots far stronger than a player of their level.
+static void population_fit_stats_to_level(mmo_charstatus& status, int32_t level)
+{
+	const int32_t budget = static_cast<int32_t>(statpoint_db.get_table_point(static_cast<uint16>(level)));
+	if (budget <= 0)
+		return;
+	uint16_t* const stats[] = { &status.str, &status.agi, &status.vit, &status.int_, &status.dex, &status.luk };
+	for (int32_t percent = 100; percent > 0; percent -= 5) {
+		int32_t cost = 0;
+		for (const uint16_t* stat : stats)
+			cost += population_stat_cost(std::max(1, *stat * percent / 100));
+		if (cost <= budget || percent == 5) {
+			for (uint16_t* stat : stats)
+				*stat = static_cast<uint16_t>(std::max(1, *stat * percent / 100));
+			return;
+		}
+	}
 }
 
 static PopulationNameProfile::Strategy population_effective_name_strategy(const PopulationNameProfile* prof)
@@ -450,7 +639,8 @@ static map_session_data* population_engine_spawn_shell(int16_t map_id, int x, in
 	uint16_t head_bottom, uint32_t option, uint16_t cloth_color, uint16_t garment,
 	struct script_code* init_script, bool skip_arrow, const PopulationEngine* pop_cfg,
 	uint8_t map_category = 0,
-	PopulationDbSource db_source = PopulationDbSource::Main);
+	PopulationDbSource db_source = PopulationDbSource::Main,
+	int16_t map_base_level = -1, int16_t map_job_level = -1);
 static std::string generate_bot_name(uint32_t index);
 static std::string generate_population_pc_name(uint32_t index, const PopulationEngine* cfg);
 static int16_t get_random_job_id();
@@ -898,10 +1088,14 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 		const uint16_t hair_color  = static_cast<uint16_t>(rnd() % 131);
 		const uint16_t cloth_color = static_cast<uint16_t>(rnd() % 699);
 
+		// nostalRE: the level comes first, since it decides what the shell can wear.
+		int16_t map_base_level = -1, map_job_level = -1;
+		if (battle_config.population_engine_map_levels)
+			population_roll_map_levels(job_id, map_id, map_category, map_base_level, map_job_level);
+
 		// Pick one item randomly from each equipment pool (empty pool = no item in that slot).
-		auto pick_pool = [](const std::vector<uint16_t>& p) -> uint16_t {
-			if (p.empty()) return 0;
-			return p.size() == 1 ? p[0] : p[rnd() % p.size()];
+		auto pick_pool = [map_base_level](const std::vector<uint16_t>& p) -> uint16_t {
+			return population_pick_gear(p, map_base_level);
 		};
 
 		uint16_t weapon = 0, shield = 0, head_top = 0, head_mid = 0, head_bottom = 0, garment = 0;
@@ -909,6 +1103,8 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 		bool skip_arrow = false;
 		if (equipment) {
 			weapon      = pick_pool(equipment->weapon_pool);
+			if (weapon == 0 && map_base_level >= 0)
+				weapon = population_starter_weapon(equipment->weapon_pool, map_base_level);
 			shield      = pick_pool(equipment->shield_pool);
 			head_top    = pick_pool(equipment->head_top_pool);
 			head_mid    = pick_pool(equipment->head_mid_pool);
@@ -938,7 +1134,8 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 		map_session_data* sd = population_engine_spawn_shell(
 			map_id, x, y, index, job_id, sex, hair_style,
 			hair_color, weapon, shield, head_top, head_mid, head_bottom,
-			0 /*option*/, cloth_color, garment, init_script, skip_arrow, pop_cfg, map_category, pre_src);
+			0 /*option*/, cloth_color, garment, init_script, skip_arrow, pop_cfg, map_category, pre_src,
+			map_base_level, map_job_level);
 
 		if (sd) {
 			g_population_engine_pcs.push_back(sd);
@@ -1607,7 +1804,8 @@ static map_session_data* population_engine_spawn_shell(int16_t map_id, int x, in
 	uint16_t head_bottom, uint32_t option, uint16_t cloth_color, uint16_t garment,
 	struct script_code* init_script, bool skip_arrow, const PopulationEngine* pop_cfg,
 	uint8_t map_category,
-	PopulationDbSource db_source)
+	PopulationDbSource db_source,
+	int16_t map_base_level, int16_t map_job_level)
 {
 	PE_PERF_SCOPE("spawn_shell");
 	if (map_id < 0) {
@@ -1702,13 +1900,17 @@ static map_session_data* population_engine_spawn_shell(int16_t map_id, int x, in
 	sd->status.robe       = garment;
 	sd->status.option     = option;
 
-	if (pop_cfg != nullptr && pop_cfg->base_level_min >= 0) {
+	if (map_base_level >= 0) {
+		sd->status.base_level = map_base_level;
+	} else if (pop_cfg != nullptr && pop_cfg->base_level_min >= 0) {
 		const int16_t hi = pop_cfg->base_level_max >= 0 ? pop_cfg->base_level_max : pop_cfg->base_level_min;
 		sd->status.base_level = cap_value(population_roll_closed_range(pop_cfg->base_level_min, hi), 1, MAX_LEVEL);
 	} else {
 		sd->status.base_level = 99;
 	}
-	if (pop_cfg != nullptr && pop_cfg->job_level_min >= 0) {
+	if (map_job_level >= 0) {
+		sd->status.job_level = map_job_level;
+	} else if (pop_cfg != nullptr && pop_cfg->job_level_min >= 0) {
 		const int16_t hi = pop_cfg->job_level_max >= 0 ? pop_cfg->job_level_max : pop_cfg->job_level_min;
 		sd->status.job_level = cap_value(population_roll_closed_range(pop_cfg->job_level_min, hi), 1, MAX_LEVEL);
 	} else {
@@ -1749,6 +1951,15 @@ static map_session_data* population_engine_spawn_shell(int16_t map_id, int x, in
 		sd->status.luk = cap_value(static_cast<uint16_t>(population_roll_closed_range(pop_cfg->luk_min, hi)), 1, 999);
 	} else {
 		sd->status.luk = static_cast<uint16_t>(90 + (rnd() % 20));
+	}
+	if (map_base_level >= 0) {
+		sd->status.str  = population_scale_stat(sd->status.str,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->str_min >= 0);
+		sd->status.agi  = population_scale_stat(sd->status.agi,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->agi_min >= 0);
+		sd->status.vit  = population_scale_stat(sd->status.vit,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->vit_min >= 0);
+		sd->status.int_ = population_scale_stat(sd->status.int_, map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->intl_min >= 0);
+		sd->status.dex  = population_scale_stat(sd->status.dex,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->dex_min >= 0);
+		sd->status.luk  = population_scale_stat(sd->status.luk,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->luk_min >= 0);
+		population_fit_stats_to_level(sd->status, map_base_level);
 	}
 
 	// HP/SP placeholders — status_calc_pc() overwrites these from job_stats.yml (includes
@@ -2287,9 +2498,8 @@ static map_session_data* population_engine_spawn_shell(int16_t map_id, int x, in
     }
 
     if (pop_cfg != nullptr) {
-        auto pick_pool_cfg = [](const std::vector<uint16_t>& p) -> uint16_t {
-            if (p.empty()) return 0;
-            return p.size() == 1 ? p[0] : p[rnd() % p.size()];
+        auto pick_pool_cfg = [map_base_level](const std::vector<uint16_t>& p) -> uint16_t {
+            return population_pick_gear(p, map_base_level);
         };
         population_engine_shell_equip_item(sd, pick_pool_cfg(pop_cfg->armor_pool),   index, "armor");
         population_engine_shell_equip_item(sd, pick_pool_cfg(pop_cfg->shoes_pool),   index, "shoes");
@@ -3553,6 +3763,25 @@ PopulationEngineStats population_engine_get_stats() {
 
 bool population_engine_is_running() {
     return g_population_engine_running;
+}
+
+void population_engine_report_levels(int fd, int16_t map_id)
+{
+	char msg[CHAT_SIZE_MAX];
+	for (const map_session_data* psd : g_population_engine_pcs) {
+		if (psd == nullptr || psd->m != map_id)
+			continue;
+		const auto worn = [psd](int32 slot) -> uint32 {
+			const int16 i = psd->equip_index[slot];
+			return i >= 0 ? static_cast<uint32>(psd->inventory.u.items_inventory[i].nameid) : 0u;
+		};
+		safesnprintf(msg, sizeof(msg), "shell job %s lv %d/%d stats %d/%d/%d/%d/%d/%d weapon %u armor %u shoes %u hp %u/%u %s",
+			job_name(psd->status.class_), psd->status.base_level, psd->status.job_level,
+			psd->status.str, psd->status.agi, psd->status.vit, psd->status.int_, psd->status.dex, psd->status.luk,
+			worn(EQI_HAND_R), worn(EQI_ARMOR), worn(EQI_SHOES),
+			psd->status.hp, psd->status.max_hp, population_engine_shell_is_mortal(psd) ? "mortal" : "immortal");
+		clif_displaymessage(fd, msg);
+	}
 }
 
 size_t population_engine_get_count() {
