@@ -39,6 +39,7 @@
 #include "path.hpp"
 #include "pc.hpp"
 #include "pet.hpp"
+#include "population_engine.hpp"
 #include "quest.hpp"
 
 using namespace rathena;
@@ -2687,6 +2688,9 @@ void mob_log_damage(mob_data* md, block_list* src, int64 damage, int64 damage_ta
 		{
 			map_session_data *sd = (TBL_PC*)src;
 			char_id = sd->status.char_id;
+			// nostalRE: a shell companion fights for its owner, like a mercenary below
+			if( const map_session_data* owner = population_engine_companion_owner( sd ) )
+				char_id = owner->status.char_id;
 			break;
 		}
 		case BL_HOM:
@@ -3553,6 +3557,10 @@ int32 mob_dead(mob_data *md, block_list *src, int32 type)
 				    sd = BL_CAST(BL_PC,battle_get_master(src));
 			}
 		}
+
+		// nostalRE: the owner gets the kill events and kill quests of a shell companion's kill
+		if( map_session_data* owner = population_engine_companion_owner( sd ) )
+			sd = owner;
 
 		if (sd) {
 			std::shared_ptr<s_mob_db> mission_mdb = mob_db.find(sd->mission_mobid), mob = mob_db.find(md->mob_id);

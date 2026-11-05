@@ -69,8 +69,15 @@ files we do not use. Our changes carry a `nostalRE` comment:
   `conf/battle_athena.conf` imports the engine conf before the app's import.
 - The FluxCP stats query (MySQL-only syntax, a table we do not ship) is compiled
   out of the SQLite build.
-- Shells never join a party: a whispered "party" gets a refusal, and
-  `party_invite` refuses shells (`src/map/party.cpp`).
+- Shells can join a player's party as companions: `party_invite` on a shell, or a
+  whispered "party" (which makes a party for a player without one); "leave" or
+  "bye" dismisses one, and so does expelling it. A companion holds a member slot
+  on the map server only (`party_companion_add`, `src/map/party.cpp`), so the
+  char-server and the database never see it. It follows its owner, across maps
+  too, helps in fights, and its damage counts as the owner's (like a mercenary);
+  it takes no EXP, zeny or items. It leaves on logout, stays out of instances,
+  and nothing brings it back after a restart. `population_engine_companion_max`
+  sets the limit per player.
 - `population_engine_max_count` 300.
 
 ## Building the Android servers

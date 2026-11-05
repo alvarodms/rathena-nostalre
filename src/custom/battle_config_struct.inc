@@ -85,6 +85,7 @@ int32 population_engine_enable; // nostalRE: master switch
 int32 population_engine_demand_spawn; // nostalRE: shells only on maps a player is on
 int32 population_engine_demand_grace_ms; // nostalRE: keep a vacated map's shells this long
 int32 population_engine_density_pct; // nostalRE: scales spawn table counts
+int32 population_engine_companion_max; // nostalRE: shells one player can have in their party
 /// Daily cycle: 0=off, 1=on. When enabled, town shells switch behavior by server hour:
 ///   06:00-17:59 = configured behavior, 18:00-21:59 = Social, 22:00-05:59 = Sit.
 ///   Field/dungeon shells always use their configured behavior.

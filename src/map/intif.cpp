@@ -704,6 +704,9 @@ int32 intif_party_changemap(map_session_data *sd,int32 online)
 		return 0;
 	if(!sd)
 		return 0;
+	// nostalRE: a shell companion is a member on this map server only
+	if (IS_POPULATION_ENGINE_ACCOUNT_ID(sd->status.account_id))
+		return 0;
 
 	if ((m = map_mapindex2mapid(sd->mapindex)) >= 0) {
 		struct map_data *mapdata = map_getmapdata(m);

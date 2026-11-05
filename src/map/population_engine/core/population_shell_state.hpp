@@ -174,8 +174,10 @@ struct s_population {
 	int    move_fail_count         = 0; ///< Consecutive movement failures chasing current target.
 	int    attack_fail_count       = 0; ///< Consecutive attack command failures on current target.
 
-	// --- Party invite auto-accept flag ---
-	bool   accept_party_request = false; ///< When true, bot auto-accepts the next party invite it receives.
+	// --- nostalRE: party companion ---
+	uint32 companion_owner = 0;     ///< Shell: account id of the player whose party it joined (0 = plain shell).
+	int32  companion_pending = 0;   ///< Player: id of the shell waiting for this player's new party (0 = none).
+	t_tick companion_next_scan = 0; ///< Shell: when to look for mobs around the owner again.
 
 	// --- Skill fail tracking ---
 	t_tick last_skill_fail    = 0;  ///< Tick of last failed skill use.
