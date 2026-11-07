@@ -68512,7 +68512,7 @@ Body:
       NoMail: true
       NoAuction: true
     Script: |
-      /* TODO */
+      duplicate_dynamic("Booster Assistant#bst");	// nostalRE: npc/custom/booster.txt
   - Id: 100338
     AegisName: Booster_W_Up_1
     Name: Booster Weapon Phase 1 Upgrade Package

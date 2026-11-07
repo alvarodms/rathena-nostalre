@@ -1,0 +1,613 @@
+//===== nostalRE Script ======================================
+//= Booster Event (2021 kRO Booster Promotion)
+//===== Description: =========================================
+//= The 2021 Booster event, after hazyforest.com/events:booster:
+//= - Booster Registration (Prontera 168,300): one Booster Call
+//=   and Booster Pack (1) per character. A Base Lv 1 Novice
+//=   becomes a High Novice, as kRO's booster characters started.
+//= - Booster Assistant: summoned next to the player by the
+//=   Booster Call (100337). Booster Coin Shop, EXP potion to coin
+//=   exchange, daily hunting quests, daily item collection
+//=   quests, help, Job Master, teleport to Prontera.
+//= - Booster Equipment (Prontera 166,300): Metal weapons,
+//=   Booster Armor boxes, Booster weapons, Booster shadow gear
+//=   and 17.1 Illusion gear, for tickets or coins.
+//= Its shops are barters in npc/custom/booster_barters.yml.
+//= Daily quests reset at 4:00, the server's local time.
+//= Off by default: the app loads this file when the Booster
+//= Event is turned on in its NPC settings.
+//============================================================
+
+// The newest 4:00 (server time), as a gettimetick(2): a daily quest done before it can be done again.
+function	script	F_Bst_Reset	{
+	return gettimetick(2) - ((gettime(DT_HOUR) + 20) % 24) * 3600 - gettime(DT_MINUTE) * 60 - gettime(DT_SECOND);
+}
+
+// Hunting quest getarg(0) (1-20) into temporary character variables:
+// @bst_lv, @bst_area$, @bst_coin, @bst_pot (potion id, 0 for none), @bst_potn, @bst_job (Job Potions),
+// and per target (up to 3) @bst_cnt[], @bst_tgt$[] and @bst_lbl$[].
+// A target is "mob:<id>{,<id>...}", "ele|size|race:<value>:<min lv>:<max lv>" or "map:<map>{,<map>...}".
+function	script	F_Bst_Hunt	{
+	.@i = getarg(0);
+	setarray .@lv[1],    1, 11, 20, 35, 50, 65, 80, 85, 85, 99, 115, 130, 145, 160, 175, 190, 200, 215, 230, 240;
+	setarray .@coin[1],  1,  1,  1,  1,  1,  1,  1,  2,  2,  3,   4,   4,   5,   5,   6,   6,   8,   8,   8,   8;
+	setarray .@pot[1],   100342, 100342, 100342, 100342, 100343, 100343, 100343, 100343, 100343, 100344,
+	                     100344, 100344, 100344, 100345, 100345, 100345, 0, 0, 0, 0;
+	setarray .@potn[1],  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 7, 7, 0, 0, 0, 0;
+	setarray .@job[1],   0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0;
+	setarray .@area$[1],
+		"South Prontera Field", "Payon Field", "Prontera Culverts", "Mjolnir Dead Pit", "Byalan Dungeon",
+		"Payon Dungeon", "Clock Tower", "Turtle Island", "Glast Heim Prison", "Juperos",
+		"Manuk Field", "Old Glast Heim", "Prontera Underground Prison", "Nightmare Clock Tower", "Glast Heim Abyss",
+		"Einbech Mines", "Banquet of the Dead", "Amicitia, 1st floor", "Amicitia, 2nd floor", "Fallen Opera House";
+
+	deletearray @bst_cnt;
+	deletearray @bst_tgt$;
+	deletearray @bst_lbl$;
+	switch (.@i) {
+	case 1:
+		setarray @bst_cnt, 10;
+		setarray @bst_tgt$, "mob:1007";
+		break;
+	case 2:
+		setarray @bst_cnt, 10, 10, 10;
+		setarray @bst_tgt$, "mob:1014", "mob:1025", "mob:1215";
+		break;
+	case 3:
+		setarray @bst_cnt, 30, 30, 20;
+		setarray @bst_tgt$, "mob:1053", "mob:1054", "mob:1077";
+		break;
+	case 4:
+		setarray @bst_cnt, 30, 30, 10;
+		setarray @bst_tgt$, "mob:1145", "mob:1169", "mob:1121";
+		break;
+	case 5:
+		setarray @bst_cnt, 30, 30, 30;
+		setarray @bst_tgt$, "mob:1069", "mob:1264", "mob:1065";
+		break;
+	case 6:
+		setarray @bst_cnt, 30, 30, 40;
+		setarray @bst_tgt$, "mob:1026", "mob:1188", "mob:1170";
+		break;
+	case 7:
+		setarray @bst_cnt, 20, 20, 20;
+		setarray @bst_tgt$, "mob:1269", "mob:1199", "mob:1195";
+		break;
+	case 8:
+		setarray @bst_cnt, 20, 30, 30;
+		setarray @bst_tgt$, "mob:1314", "mob:1319", "mob:1318";
+		break;
+	case 9:
+		setarray @bst_cnt, 80;
+		setarray @bst_tgt$, "map:gl_prison,gl_prison1";
+		setarray @bst_lbl$, "Monsters in Glast Heim Prison";
+		break;
+	case 10:	// Water (1), Medium (1), Formless (0)
+		setarray @bst_cnt, 30, 30, 30;
+		setarray @bst_tgt$, "ele:1:99:115", "size:1:99:115", "race:0:99:115";
+		setarray @bst_lbl$, "Water property monsters (Lv 99-115)", "Medium size monsters (Lv 99-115)", "Formless monsters (Lv 99-115)";
+		break;
+	case 11:	// Earth (2), Large (2), Demi-Human (7)
+		setarray @bst_cnt, 30, 30, 30;
+		setarray @bst_tgt$, "ele:2:115:130", "size:2:115:130", "race:7:115:130";
+		setarray @bst_lbl$, "Earth property monsters (Lv 115-130)", "Large size monsters (Lv 115-130)", "Demi-Human monsters (Lv 115-130)";
+		break;
+	case 12:	// Shadow (7), Small (0), Insect (4)
+		setarray @bst_cnt, 30, 30, 30;
+		setarray @bst_tgt$, "ele:7:130:145", "size:0:130:145", "race:4:130:145";
+		setarray @bst_lbl$, "Shadow property monsters (Lv 130-145)", "Small size monsters (Lv 130-145)", "Insect monsters (Lv 130-145)";
+		break;
+	case 13:	// Earth (2), Medium (1), Small (0)
+		setarray @bst_cnt, 30, 30, 30;
+		setarray @bst_tgt$, "ele:2:145:160", "size:1:145:160", "size:0:145:160";
+		setarray @bst_lbl$, "Earth property monsters (Lv 145-160)", "Medium size monsters (Lv 145-160)", "Small size monsters (Lv 145-160)";
+		break;
+	case 14:
+		setarray @bst_cnt, 60, 1, 1;
+		setarray @bst_tgt$, "mob:2917", "mob:2921,2922", "mob:2923";
+		break;
+	case 15:
+		setarray @bst_cnt, 20, 20, 20;
+		setarray @bst_tgt$, "mob:20379", "mob:20380", "mob:20367";
+		break;
+	case 16:
+		setarray @bst_cnt, 10, 20, 10;
+		setarray @bst_tgt$, "mob:20602", "mob:20603", "mob:20598";
+		break;
+	case 17:
+		setarray @bst_cnt, 40;
+		setarray @bst_tgt$, "map:nif_dun01";
+		setarray @bst_lbl$, "Monsters in the Banquet of the Dead";
+		break;
+	case 18:
+		setarray @bst_cnt, 40;
+		setarray @bst_tgt$, "map:amicitia1";
+		setarray @bst_lbl$, "Monsters on Amicitia's 1st floor";
+		break;
+	case 19:
+		setarray @bst_cnt, 40;
+		setarray @bst_tgt$, "map:amicitia2";
+		setarray @bst_lbl$, "Monsters on Amicitia's 2nd floor";
+		break;
+	case 20:
+		setarray @bst_cnt, 40;
+		setarray @bst_tgt$, "map:nif_dun02";
+		setarray @bst_lbl$, "Monsters in the Fallen Opera House";
+		break;
+	default:
+		return 0;
+	}
+	// a monster target's label is the first monster's name
+	for (.@t = 0; .@t < getarraysize(@bst_cnt); .@t++) {
+		if (@bst_lbl$[.@t] == "") {
+			explode(.@p$, @bst_tgt$[.@t], ":");
+			explode(.@ids$, .@p$[1], ",");
+			@bst_lbl$[.@t] = getmonsterinfo(atoi(.@ids$[0]), MOB_NAME);
+		}
+	}
+	@bst_lv = .@lv[.@i];
+	@bst_area$ = .@area$[.@i];
+	@bst_coin = .@coin[.@i];
+	@bst_pot = .@pot[.@i];
+	@bst_potn = .@potn[.@i];
+	@bst_job = .@job[.@i];
+	return 1;
+}
+
+// The rewards of the hunting quest F_Bst_Hunt loaded, as one line.
+function	script	F_Bst_Rewards	{
+	.@s$ = @bst_coin + " " + getitemname(1000254);
+	if (@bst_pot)
+		.@s$ += ", " + @bst_potn + " " + getitemname(@bst_pot);
+	if (@bst_job)
+		.@s$ += ", " + @bst_job + " " + getitemname(100346);
+	return .@s$;
+}
+
+// Item collection request getarg(0) (1-11): returns its items as "<id>:<amount>,..." and sets @bst_coin.
+function	script	F_Bst_Collect	{
+	setarray .@coin[1], 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3;
+	setarray .@items$[1],
+		"914:10,705:10,949:5",		// Fluff, Clover, Feather
+		"906:5,921:10,926:10",		// Pointed Scale, Mushroom Spore, Snake Scale
+		"7033:10,955:10,928:10",	// Poison Spore, Worm Peeling, Insect Feeler
+		"1041:15,1017:15,1040:5",	// Lantern, Mole Whiskers, Elder Pixie's Moustache
+		"963:10,951:10,956:10",		// Sharp Scale, Fin, Gill
+		"901:15,1094:10,1020:15",	// Daenggie, Short Daenggie, Black Hair
+		"1095:15,7001:15,1097:10",	// Clock Hand, Mould Powder, Worn Out Page
+		"967:20,7066:5,7072:5",		// Turtle Shell, Ice Cubic, Old Shuriken
+		"1015:10,1098:15,1099:15",	// Tongue, Manacles, Worn-out Prison Uniform
+		"7561:30",					// Glacial Heart
+		"7317:15,7319:15";			// Rusty Screw, Used Iron Plate
+	@bst_coin = .@coin[getarg(0)];
+	return .@items$[getarg(0)];
+}
+
+// Counts the kills of the active hunting quest.
+-	script	Booster#hunt	-1,{
+	end;
+
+OnNPCKillEvent:
+	if (!BST_HQ || !callfunc("F_Bst_Hunt", BST_HQ))
+		end;
+	.@mob = killedrid;
+	.@lv = getmonsterinfo(.@mob, MOB_LV);
+	.@map$ = strcharinfo(3);
+	.@n = getarraysize(@bst_cnt);
+	.@done = 0;
+	for (.@t = 0; .@t < .@n; .@t++) {
+		if (BST_HK[.@t] >= @bst_cnt[.@t]) {
+			.@done++;
+			continue;
+		}
+		explode(.@p$, @bst_tgt$[.@t], ":");
+		.@hit = 0;
+		if (.@p$[0] == "mob" || .@p$[0] == "map") {
+			deletearray .@ids$;
+			explode(.@ids$, .@p$[1], ",");
+			for (.@k = 0; .@k < getarraysize(.@ids$); .@k++) {
+				if ((.@p$[0] == "mob" && atoi(.@ids$[.@k]) == .@mob) || (.@p$[0] == "map" && .@ids$[.@k] == .@map$)) {
+					.@hit = 1;
+					break;
+				}
+			}
+		} else if (.@lv >= atoi(.@p$[2]) && .@lv <= atoi(.@p$[3])) {
+			if (.@p$[0] == "ele")
+				.@hit = getmonsterinfo(.@mob, MOB_ELEMENT) == atoi(.@p$[1]);
+			else if (.@p$[0] == "size")
+				.@hit = getmonsterinfo(.@mob, MOB_SIZE) == atoi(.@p$[1]);
+			else if (.@p$[0] == "race")
+				.@hit = getmonsterinfo(.@mob, MOB_RACE) == atoi(.@p$[1]);
+		}
+		if (!.@hit)
+			continue;
+		BST_HK[.@t]++;
+		dispbottom "[Booster] " + @bst_lbl$[.@t] + ": " + BST_HK[.@t] + "/" + @bst_cnt[.@t];
+		if (BST_HK[.@t] >= @bst_cnt[.@t])
+			.@done++;
+		.@counted = 1;
+	}
+	if (.@counted && .@done == .@n)
+		dispbottom "[Booster] Hunting quest done! Ring your Booster Call to report to the Booster Assistant.";
+	end;
+}
+
+// Summoned next to the player by the Booster Call (item 100337) with duplicate_dynamic.
+-	script	Booster Assistant#bst	4_F_EDEN_OFFICER,{
+	function Bst_Hunting;
+	function Bst_HuntInfo;
+	function Bst_Collection;
+	function Bst_Help;
+
+	.@n$ = "[Booster Assistant]";
+	mes .@n$;
+	mes "Hello, " + strcharinfo(0) + "!";
+	mes "How can I help your adventure today?";
+	next;
+	while (true) {
+		switch (select("Booster Coin:Hunting Quests:Item Collection Quests:Additional Help:Cancel")) {
+		case 1:
+			switch (select("Booster Coin Shop:Exchange EXP potions for Booster Coins:Back")) {
+			case 1:
+				close2;
+				callshop "booster_coin_shop";
+				end;
+			case 2:
+				mes .@n$;
+				mes "Five Growth Potions of a kind, or fifteen Job Potions, make one Booster Coin.";
+				close2;
+				callshop "booster_coin_exchange";
+				end;
+			}
+			break;
+		case 2:
+			Bst_Hunting();
+			break;
+		case 3:
+			Bst_Collection();
+			break;
+		case 4:
+			Bst_Help();
+			break;
+		default:
+			mes .@n$;
+			mes "Ring the Booster Call whenever you need me!";
+			close;
+		}
+	}
+	end;
+
+	// The active quest, to report or give up; else the quests to take.
+	function Bst_Hunting {
+		.@n$ = "[Booster Assistant]";
+		if (BST_HQ) {
+			callfunc "F_Bst_Hunt", BST_HQ;
+			Bst_HuntInfo(BST_HQ, 1);
+			.@done = 1;
+			for (.@t = 0; .@t < getarraysize(@bst_cnt); .@t++)
+				if (BST_HK[.@t] < @bst_cnt[.@t])
+					.@done = 0;
+			if (.@done) {
+				if (select("Report the quest:Later") == 2)
+					return;
+				if (!checkweight(1000254, @bst_coin, 100346, max(1, @bst_job)) || (@bst_pot && !checkweight(@bst_pot, @bst_potn))) {
+					mes .@n$;
+					mes "You are carrying too much! Make some room in your bag first.";
+					next;
+					return;
+				}
+				.@i = BST_HQ;
+				BST_HDONE[.@i] = gettimetick(2);
+				BST_HQ = 0;
+				deletearray BST_HK;
+				getitem 1000254, @bst_coin;
+				if (@bst_pot)
+					getitem @bst_pot, @bst_potn;
+				if (@bst_job)
+					getitem 100346, @bst_job;
+				mes .@n$;
+				mes "Well done! Here is your reward.";
+				mes "This quest can be done again after 4:00.";
+				next;
+				return;
+			}
+			if (select("Keep hunting:Give up this quest") == 2) {
+				BST_HQ = 0;
+				deletearray BST_HK;
+				mes .@n$;
+				mes "Quest given up. You can take another one now.";
+				next;
+			}
+			return;
+		}
+		switch (select("Quests below Lv 99:Quests from Lv 99:Quest information:Back")) {
+		case 1:
+			.@from = 1;
+			.@to = 9;
+			break;
+		case 2:
+			.@from = 10;
+			.@to = 20;
+			break;
+		case 3:
+			mes .@n$;
+			mes "Take one hunting quest at a time, at or above its level.";
+			mes "Hunt anywhere: the kills count wherever you find the monsters, but a quest on a map counts only that map's monsters.";
+			next;
+			mes .@n$;
+			mes "When you are done, ring the Booster Call and report to me for Booster Coins and potions.";
+			mes "Each quest, and each item collection request, can be done once a day. They reset at 4:00.";
+			next;
+			return;
+		default:
+			return;
+		}
+		.@reset = callfunc("F_Bst_Reset");
+		.@menu$ = "";
+		for (.@i = .@from; .@i <= .@to; .@i++) {
+			callfunc "F_Bst_Hunt", .@i;
+			.@s$ = "[Lv " + @bst_lv + "] " + @bst_area$;
+			if (BST_HDONE[.@i] >= .@reset)
+				.@s$ += " (done today)";
+			else if (BaseLevel < @bst_lv)
+				.@s$ += " (too low)";
+			.@menu$ += .@s$ + ":";
+		}
+		.@i = select(.@menu$ + "Back") - 1 + .@from;
+		if (.@i > .@to)
+			return;
+		callfunc "F_Bst_Hunt", .@i;
+		Bst_HuntInfo(.@i, 0);
+		if (BST_HDONE[.@i] >= .@reset) {
+			mes .@n$;
+			mes "You have done this quest today. It resets at 4:00.";
+			next;
+			return;
+		}
+		if (BaseLevel < @bst_lv) {
+			mes .@n$;
+			mes "This quest needs Base Level " + @bst_lv + ".";
+			next;
+			return;
+		}
+		if (select("Take this quest:Back") == 2)
+			return;
+		BST_HQ = .@i;
+		deletearray BST_HK;
+		mes .@n$;
+		mes "Quest taken. Good hunting!";
+		mes "Your progress shows in the chat as you hunt.";
+		next;
+		return;
+	}
+
+	// Hunting quest getarg(0) (loaded by F_Bst_Hunt) with its targets; getarg(1): show the kills so far.
+	function Bst_HuntInfo {
+		mes "[Lv " + @bst_lv + "] " + @bst_area$;
+		for (.@t = 0; .@t < getarraysize(@bst_cnt); .@t++) {
+			if (getarg(1))
+				mes "- " + @bst_lbl$[.@t] + ": " + min(BST_HK[.@t], @bst_cnt[.@t]) + "/" + @bst_cnt[.@t];
+			else
+				mes "- " + @bst_cnt[.@t] + "x " + @bst_lbl$[.@t];
+		}
+		mes "Reward: " + callfunc("F_Bst_Rewards");
+		next;
+		return;
+	}
+
+	// The item collection requests: hand the items over for coins, each once a day.
+	function Bst_Collection {
+		.@n$ = "[Booster Assistant]";
+		.@reset = callfunc("F_Bst_Reset");
+		.@menu$ = "";
+		for (.@i = 1; .@i <= 11; .@i++) {
+			callfunc "F_Bst_Collect", .@i;
+			.@menu$ += "Request " + .@i + " (" + @bst_coin + " coin" + (@bst_coin > 1 ? "s" : "") + ")" + (BST_CDONE[.@i] >= .@reset ? " (done today)" : "") + ":";
+		}
+		.@i = select(.@menu$ + "Back");
+		if (.@i > 11)
+			return;
+		explode(.@pair$, callfunc("F_Bst_Collect", .@i), ",");
+		.@n = getarraysize(.@pair$);
+		.@ok = 1;
+		mes .@n$;
+		mes "Request " + .@i + " needs:";
+		for (.@k = 0; .@k < .@n; .@k++) {
+			explode(.@p$, .@pair$[.@k], ":");
+			.@id[.@k] = atoi(.@p$[0]);
+			.@amount[.@k] = atoi(.@p$[1]);
+			mes "- " + .@amount[.@k] + "x " + getitemname(.@id[.@k]) + " (" + countitem(.@id[.@k]) + ")";
+			if (countitem(.@id[.@k]) < .@amount[.@k])
+				.@ok = 0;
+		}
+		mes "Reward: " + @bst_coin + " " + getitemname(1000254);
+		next;
+		if (BST_CDONE[.@i] >= .@reset) {
+			mes .@n$;
+			mes "You have done this request today. It resets at 4:00.";
+			next;
+			return;
+		}
+		if (!.@ok) {
+			mes .@n$;
+			mes "Come back when you have all the items.";
+			next;
+			return;
+		}
+		if (select("Hand them over:Back") == 2)
+			return;
+		if (!checkweight(1000254, @bst_coin)) {
+			mes .@n$;
+			mes "You are carrying too much! Make some room in your bag first.";
+			next;
+			return;
+		}
+		for (.@k = 0; .@k < .@n; .@k++)
+			delitem .@id[.@k], .@amount[.@k];
+		BST_CDONE[.@i] = gettimetick(2);
+		getitem 1000254, @bst_coin;
+		mes .@n$;
+		mes "Thank you! Here are your Booster Coins.";
+		next;
+		return;
+	}
+
+	function Bst_Help {
+		.@n$ = "[Booster Assistant]";
+		switch (select("How to play:Tips:Job Changer:Teleport to Prontera:Back")) {
+		case 1:
+			mes .@n$;
+			mes "Open your Booster Pack: inside is another pack that opens at a higher level, and so on up to Lv 230. Each one has gear and supplies for that level.";
+			next;
+			mes .@n$;
+			mes "Earn Booster Coins with my daily hunting quests and item collection requests, then spend them in the Booster Coin Shop.";
+			mes "Equipment tickets go to the Booster Equipment NPC, in north Prontera by the castle.";
+			next;
+			break;
+		case 2:
+			mes .@n$;
+			mes "- Hunting quests pay Growth Potions too: five of a kind (or fifteen Job Potions) trade for a Booster Coin.";
+			mes "- A Metal Weapon Ticket costs only 1 coin: a solid weapon for any job.";
+			mes "- Booster shadow gear costs 15 coins a piece.";
+			mes "- Everything resets at 4:00, so check in daily!";
+			next;
+			break;
+		case 3:
+			if (getnpcid(0, "Job Master") == 0) {
+				mes .@n$;
+				mes "The Job Master is turned off in the app's NPC settings, so I can't call them.";
+				next;
+				break;
+			}
+			if (duplicate_dynamic("Job Master") == "") {
+				mes .@n$;
+				mes "The Job Master couldn't come here. Try again somewhere with more space.";
+				next;
+				break;
+			}
+			mes .@n$;
+			mes "I've called the Job Master. They're right next to you!";
+			close;
+		case 4:
+			mes .@n$;
+			mes "Off to Prontera!";
+			close2;
+			warp "prontera", 167, 296;
+			end;
+		}
+		return;
+	}
+}
+
+// One Booster Call and Booster Pack (1) per character; a new Booster Call for a character who lost theirs.
+prontera,168,300,4	script	Booster Registration	4_F_KAFRA9,{
+	.@n$ = "[Booster Registration]";
+	if (BST_REG) {
+		if (countitem(100337)) {
+			mes .@n$;
+			mes "You are already a Booster adventurer!";
+			mes "Use your " + getitemname(100337) + " to call the Booster Assistant.";
+			close;
+		}
+		mes .@n$;
+		mes "Did you lose your " + getitemname(100337) + "? Here is a new one.";
+		getitem 100337, 1;
+		close;
+	}
+	mes .@n$;
+	mes "Welcome to the Booster Event!";
+	mes "Register and you get a " + getitemname(100337) + " and a " + getitemname(100029) + ".";
+	next;
+	mes .@n$;
+	mes "The Booster Call summons the Booster Assistant, with daily quests that pay Booster Coins and a shop to spend them in.";
+	mes "The Booster Pack holds gear and supplies, and more packs that open as you level.";
+	next;
+	// a new character starts over as a High Novice, as kRO's booster characters did: transcended without a rebirth
+	.@high = (Class == Job_Novice && BaseLevel == 1);
+	if (.@high) {
+		mes .@n$;
+		mes "And since you're just starting out, you become a ^0000FFHigh Novice^000000: your first job will be a transcended one, with no rebirth needed later.";
+		next;
+	}
+	if (select("Register:Not now") == 2) {
+		mes .@n$;
+		mes "Come back any time!";
+		close;
+	}
+	if (!checkweight(100337, 1, 100029, 1)) {
+		mes .@n$;
+		mes "You are carrying too much! Make some room in your bag first.";
+		close;
+	}
+	BST_REG = 1;
+	if (.@high) {
+		// as the Job Master's rebirth: stats to 1 with the transcended 100 points, Novice skills
+		jobchange Job_Novice_High;
+		resetlvl 1;
+		specialeffect2 EF_ANGEL2;
+	}
+	getitem 100337, 1;
+	getitem 100029, 1;
+	mes .@n$;
+	mes "You're registered! Use the " + getitemname(100337) + " any time.";
+	if (.@high)
+		mes "At Job Level 10, the Job Master makes you a transcended first job.";
+	close;
+}
+
+// Equipment for Booster tickets and coins.
+prontera,166,300,4	script	Booster Equipment	4_M_EDEN_GUARDER,{
+	.@n$ = "[Booster Equipment]";
+	mes .@n$;
+	mes "Bring me your Booster tickets and coins, and I'll fit you out.";
+	next;
+	switch (select("Metal weapons:Booster Armor boxes:Booster weapons:Booster shadow equipment:17.1 Illusion gear:Cancel")) {
+	case 1:
+		mes .@n$;
+		mes "One " + getitemname(25820) + " for each.";
+		close2;
+		callshop "booster_metal";
+		end;
+	case 2:
+		mes .@n$;
+		mes "One " + getitemname(1000006) + " for each.";
+		mes "- Attacker: physical melee damage.";
+		mes "- Ranged: long range damage.";
+		mes "- Elemental: Water, Wind, Earth, Fire and Neutral magic.";
+		mes "- Defiant: Ghost, Holy, Shadow, Undead and Poison magic.";
+		close2;
+		callshop "booster_armor";
+		end;
+	case 3:
+		mes .@n$;
+		mes "One " + getitemname(1000253) + " for each. Which job's weapons?";
+		next;
+		setarray .@shop$, "swordman", "merchant", "thief", "mage", "acolyte", "archer", "taekwon", "ninja", "summoner", "gunslinger", "supernovice";
+		.@i = select("Swordman:Merchant:Thief:Mage:Acolyte:Archer:Taekwon:Ninja:Summoner:Gunslinger:Super Novice:Cancel") - 1;
+		if (.@i >= getarraysize(.@shop$))
+			close;
+		close2;
+		callshop "booster_weapon_" + .@shop$[.@i];
+		end;
+	case 4:
+		mes .@n$;
+		mes "15 " + getitemname(1000254) + " for each piece.";
+		mes "Booster shadow equipment can't be refined.";
+		close2;
+		callshop "booster_shadow";
+		end;
+	case 5:
+		if (isbegin_quest(17019) == 0) {	// the Illusion enchanter's own gate: Episode 17.1's main story done
+			mes .@n$;
+			mes "Illusion gear is for adventurers who have finished the Episode 17.1 story.";
+			close;
+		}
+		mes .@n$;
+		mes "10 " + getitemname(1000254) + " for each piece, 20 for the Upgrade Package.";
+		mes "Illusion gear is bound to your character.";
+		close2;
+		callshop "booster_illusion";
+		end;
+	}
+	close;
+}
