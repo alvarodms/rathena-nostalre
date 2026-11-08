@@ -8,7 +8,7 @@
 //= - Booster Assistant: summoned next to the player by the
 //=   Booster Call (100337). Booster Coin Shop, EXP potion to coin
 //=   exchange, daily hunting quests, daily item collection
-//=   quests, help, Job Master, teleport to Prontera.
+//=   quests.
 //= - Booster Equipment (Prontera 166,300): Metal weapons,
 //=   Booster Armor boxes, Booster weapons, Booster shadow gear
 //=   and 17.1 Illusion gear, for tickets or coins.
@@ -237,7 +237,6 @@ OnNPCKillEvent:
 	function Bst_Hunting;
 	function Bst_HuntInfo;
 	function Bst_Collection;
-	function Bst_Help;
 
 	.@n$ = "[Booster Assistant]";
 	mes .@n$;
@@ -245,7 +244,7 @@ OnNPCKillEvent:
 	mes "How can I help your adventure today?";
 	next;
 	while (true) {
-		switch (select("Booster Coin:Hunting Quests:Item Collection Quests:Additional Help:Cancel")) {
+		switch (select("Booster Coin:Hunting Quests:Item Collection Quests:Cancel")) {
 		case 1:
 			switch (select("Booster Coin Shop:Exchange EXP potions for Booster Coins:Back")) {
 			case 1:
@@ -265,9 +264,6 @@ OnNPCKillEvent:
 			break;
 		case 3:
 			Bst_Collection();
-			break;
-		case 4:
-			Bst_Help();
 			break;
 		default:
 			mes .@n$;
@@ -449,52 +445,6 @@ OnNPCKillEvent:
 		mes .@n$;
 		mes "Thank you! Here are your Booster Coins.";
 		next;
-		return;
-	}
-
-	function Bst_Help {
-		.@n$ = "[Booster Assistant]";
-		switch (select("How to play:Tips:Job Changer:Teleport to Prontera:Back")) {
-		case 1:
-			mes .@n$;
-			mes "Open your Booster Pack: inside is another pack that opens at a higher level, and so on up to Lv 230. Each one has gear and supplies for that level.";
-			next;
-			mes .@n$;
-			mes "Earn Booster Coins with my daily hunting quests and item collection requests, then spend them in the Booster Coin Shop.";
-			mes "Equipment tickets go to the Booster Equipment NPC, in north Prontera by the castle.";
-			next;
-			break;
-		case 2:
-			mes .@n$;
-			mes "- Hunting quests pay Growth Potions too: five of a kind (or fifteen Job Potions) trade for a Booster Coin.";
-			mes "- A Metal Weapon Ticket costs only 1 coin: a solid weapon for any job.";
-			mes "- Booster shadow gear costs 15 coins a piece.";
-			mes "- Everything resets at 4:00, so check in daily!";
-			next;
-			break;
-		case 3:
-			if (getnpcid(0, "Job Master") == 0) {
-				mes .@n$;
-				mes "The Job Master is turned off in the app's NPC settings, so I can't call them.";
-				next;
-				break;
-			}
-			if (duplicate_dynamic("Job Master") == "") {
-				mes .@n$;
-				mes "The Job Master couldn't come here. Try again somewhere with more space.";
-				next;
-				break;
-			}
-			mes .@n$;
-			mes "I've called the Job Master. They're right next to you!";
-			close;
-		case 4:
-			mes .@n$;
-			mes "Off to Prontera!";
-			close2;
-			warp "prontera", 167, 296;
-			end;
-		}
 		return;
 	}
 }
