@@ -39,6 +39,16 @@ Summary:
   (free), Stylist and Reset Girl, in Prontera's square. Prontera's Healer
   moved to 162,195, clear of the Ash-Vacuum Warper. `npc/nostalre_off.conf`
   (empty here) takes `delnpc:` lines for the ones the app's player turns off.
+- Booster Event (`npc/custom/booster.txt`, off by default: the app adds an `npc:` line
+  for it): kRO's 2021 Booster Promotion. A Booster Registration NPC (Prontera 168,300)
+  gives each character a Booster Call and Booster Pack (1), and makes a Base Lv 1
+  Novice a High Novice (transcended without a rebirth, like kRO's); the Booster Call
+  (item 100337, its script was a TODO) summons the Booster Assistant next to the
+  player (`duplicate_dynamic`), with the Booster Coin Shop, EXP potion exchange, daily
+  hunting and item collection quests (reset at 4:00 server time). A Booster Equipment
+  NPC (Prontera 166,300) trades tickets and coins for Metal, Booster, shadow and
+  Illusion gear. The shops are barters in `npc/custom/booster_barters.yml`, imported by
+  `npc/custom/barters.yml`, so they load even with the event off (nothing opens them).
 - Job Master offers the 4th job change: its check kept the transcendent bit,
   which no 4th job's class has, so no transcendent 3rd job got the option.
 
