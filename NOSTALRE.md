@@ -74,8 +74,11 @@ files we do not use. Our changes carry a `nostalRE` comment:
 - `population_engine_max_count` 300.
 - `population_engine_map_levels` (on): autosummoned shells take their level from
   the mean level of their map's permanent monsters, with a floor by class (a
-  Knight is at least 45); towns and maps with no monsters use 30-85. Stats are
-  fitted to what the level has in `db/re/statpoint.yml`, gear to what it can wear.
+  Knight is at least 45); towns and maps with no monsters use 30-85. A class
+  whose floor is clearly above the map steps down (Knight to Swordsman to
+  Novice) and still counts as its spawn-table job. Stats are fitted to what the
+  level has in `db/re/statpoint.yml`, gear to what it can wear; a shell below its
+  whole weapon pool gets the plainest weapon of that kind its job can wear.
   Off, and arena and `@populate` shells either way: the profile's range or 99/70.
   `@populate levels` lists the shells on your map.
 
