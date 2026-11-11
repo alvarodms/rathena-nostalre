@@ -73,11 +73,19 @@ files we do not use. Our changes carry a `nostalRE` comment:
   whispered "party" (which makes a party for a player without one); "leave" or
   "bye" dismisses one, and so does expelling it. A companion holds a member slot
   on the map server only (`party_companion_add`, `src/map/party.cpp`), so the
-  char-server and the database never see it. It follows its owner, across maps
-  too, helps in fights, and its damage counts as the owner's (like a mercenary);
-  it takes no EXP, zeny or items. It leaves on logout, stays out of instances,
-  and nothing brings it back after a restart. `population_engine_companion_max`
-  sets the limit per player.
+  char-server and the database never see it; one record in
+  `population_engine.cpp` says whose it is, and every way out goes through
+  `population_engine_companion_dismiss`. It follows its owner, across maps too,
+  and helps in fights. It is a party member for EXP: Even Share pools its kills
+  with the player's (a party made by the whisper starts on Even Share), Each Take
+  keeps them its own, and its share is lost. The char-server's
+  `party_share_level` gap applies to it too (`party_exp_share_allowed`, read from
+  `inter_athena.conf` by the map server as well). Loot priority on its kills goes
+  to its owner, like a mercenary's. It can die: Resurrection and the like revive
+  it, and if nobody does it gets up next to its owner when they change map or
+  after `population_engine_companion_revive_ms`. It leaves on logout, stays out
+  of instances, and nothing brings it back after a restart.
+  `population_engine_companion_max` sets the limit per player.
 - `population_engine_max_count` 300.
 
 ## Building the Android servers

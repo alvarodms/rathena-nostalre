@@ -100,9 +100,10 @@ int32 party_sub_count_class(block_list *bl, va_list ap);
 int32 party_foreachsamemap(int32 (*func)(block_list *,va_list),const map_session_data* sd,int32 range,...);
 
 // nostalRE: Population Engine shells as map-server-only party members. These slots never reach the char-server.
-bool party_companion_add( party_data& p, map_session_data& shell );
-void party_companion_remove( map_session_data& shell, enum e_party_member_withdraw type );
+bool party_companion_add( party_data& p, map_session_data& shell, bool notify );
+void party_companion_clear_slot( map_session_data& shell, int32 party_id, enum e_party_member_withdraw type );
 void party_companion_moved( const map_session_data& shell );
+bool party_exp_share_allowed( const party_data& p );
 
 /*==========================================
  * Party Booking in KRO [Spiria]

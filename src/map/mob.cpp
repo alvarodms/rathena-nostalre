@@ -2688,9 +2688,6 @@ void mob_log_damage(mob_data* md, block_list* src, int64 damage, int64 damage_ta
 		{
 			map_session_data *sd = (TBL_PC*)src;
 			char_id = sd->status.char_id;
-			// nostalRE: a shell companion fights for its owner, like a mercenary below
-			if( const map_session_data* owner = population_engine_companion_owner( sd ) )
-				char_id = owner->status.char_id;
 			break;
 		}
 		case BL_HOM:
@@ -3032,17 +3029,23 @@ int32 mob_dead(mob_data *md, block_list *src, int32 type)
 
 		tmpsd[i] = tsd; // record as valid damage-log entry
 
+		// nostalRE: a shell companion takes its own EXP share, but its owner holds the loot priority its damage earns,
+		// like a mercenary's: a shell cannot use items
+		map_session_data* loot_sd = tsd;
+		if( map_session_data* owner = population_engine_companion_owner( tsd ); owner != nullptr && owner->m == m )
+			loot_sd = owner;
+
 		// Gather data to determine loot priority
 		// Check if player already has an entry
 		auto it = lootdmg.begin();
 		for (; it != lootdmg.end(); ++it)
-			if (it->sd->id == tsd->id)
+			if (it->sd->id == loot_sd->id)
 				break;
 
 		if (it == lootdmg.end()) {
 			// No matching player found, create new entry for player
 			s_dmg_entry dmg_entry;
-			dmg_entry.sd = tsd;
+			dmg_entry.sd = loot_sd;
 			dmg_entry.damage = entry.dmg;
 			lootdmg.push_back(dmg_entry);
 		} else {
@@ -3187,7 +3190,7 @@ int32 mob_dead(mob_data *md, block_list *src, int32 type)
 
 				if( j == pnum ) { //Possibly add party.
 					pt[pnum].p = party_search(temp);
-					if(pt[pnum].p && pt[pnum].p->party.exp) {
+					if(pt[pnum].p && pt[pnum].p->party.exp && party_exp_share_allowed(*pt[pnum].p)) { // nostalRE: companions' level gap
 						pt[pnum].id = temp;
 						pt[pnum].base_exp = base_exp;
 						pt[pnum].job_exp = job_exp;
@@ -3224,7 +3227,7 @@ int32 mob_dead(mob_data *md, block_list *src, int32 type)
 						pc_gainexp(tmpsd[i], md, base_exp, job_exp, 0);
 					}
 				}
-				if(zeny) // zeny from mobs [Valaris]
+				if(zeny && !population_engine_is_companion(tmpsd[i])) // zeny from mobs [Valaris]; nostalRE: a shell's would be logged
 					pc_getzeny(tmpsd[i], zeny, LOG_TYPE_PICKDROP_MONSTER);
 			}
 		}
