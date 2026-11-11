@@ -6192,9 +6192,10 @@ bool pc_dropitem(map_session_data *sd,int32 n,int32 amount)
  * Attempt to pick up an item.
  * @param sd
  * @param fitem Item that will be picked
+ * @param any_distance Skip the distance check (pickup_area's sweep)
  * @return False = fail; True = success
  *------------------------------------------*/
-bool pc_takeitem(map_session_data *sd,flooritem_data *fitem)
+bool pc_takeitem(map_session_data *sd,flooritem_data *fitem,bool any_distance)
 {
 	int32 flag = 0;
 	t_tick tick = gettick();
@@ -6202,7 +6203,7 @@ bool pc_takeitem(map_session_data *sd,flooritem_data *fitem)
 	nullpo_ret(sd);
 	nullpo_ret(fitem);
 
-	if (!check_distance_bl(fitem, sd, 2) && sd->ud.skill_id!=BS_GREED)
+	if (!any_distance && !check_distance_bl(fitem, sd, 2) && sd->ud.skill_id!=BS_GREED)
 		return false;	// Distance is too far
 
 	if (sd->sc.cant.pickup)
@@ -6273,6 +6274,33 @@ bool pc_takeitem(map_session_data *sd,flooritem_data *fitem)
 
 	map_clearflooritem(fitem);
 	return true;
+}
+
+static int32 pc_takeitem_area_sub(block_list *bl, va_list ap)
+{
+	map_session_data *sd = va_arg(ap, map_session_data *);
+
+	pc_takeitem(sd, (flooritem_data *)bl, true);
+	return 0;
+}
+
+/**
+ * Picks up the floor items within pickup_area cells of (x, y), after a pickup by hand there. Each goes through
+ * pc_takeitem, so loot priority, party share and weight hold as for any pickup.
+ * @param sd Player picking up
+ * @param x X of the item picked up by hand
+ * @param y Y of the item picked up by hand
+ */
+void pc_takeitem_area(map_session_data *sd, int16 x, int16 y)
+{
+	nullpo_retv(sd);
+
+	int16 range = static_cast<int16>(battle_config.pickup_area);
+
+	if (range <= 0)
+		return;
+
+	map_foreachinallarea(pc_takeitem_area_sub, sd->m, x - range, y - range, x + range, y + range, BL_ITEM, sd);
 }
 
 /*==========================================
