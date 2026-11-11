@@ -13,6 +13,7 @@
 
 
 { "population_engine_enable",&battle_config.population_engine_enable,0,0,1,}, // nostalRE: master switch, off by default
+{ "population_engine_map_levels",&battle_config.population_engine_map_levels,1,0,1,}, // nostalRE
 { "population_engine_demand_spawn",&battle_config.population_engine_demand_spawn,1,0,1,}, // nostalRE
 { "population_engine_demand_grace_ms",&battle_config.population_engine_demand_grace_ms,300000,0,INT_MAX,}, // nostalRE
 { "population_engine_density_pct",&battle_config.population_engine_density_pct,100,10,300,}, // nostalRE

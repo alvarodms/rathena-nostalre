@@ -58,6 +58,7 @@ ACMD_FUNC(populate)
 		clif_displaymessage(fd, "  Spawns population-engine PCs (visible shells, no autocombat).");
 		clif_displaymessage(fd, "  @populate stop | stats | status  (alias: @fakeplayers)");
 		clif_displaymessage(fd, "  @populate timing | timingreset  (wander tick profiler)");
+		clif_displaymessage(fd, "  @populate levels  (level, stats and gear of the shells on this map)");
 		return -1;
 	}
 
@@ -94,6 +95,8 @@ ACMD_FUNC(populate)
 			live_count, est_kb);
 		clif_displaymessage(fd, msg);
 		clif_displaymessage(fd, "================================");
+	} else if (strcmpi(cmd, "levels") == 0) {
+		population_engine_report_levels(fd, sd->m);
 	} else if (strcmpi(cmd, "status") == 0) {
 		if (population_engine_is_running())
 			clif_displaymessage(fd, "Population engine is RUNNING");

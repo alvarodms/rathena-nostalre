@@ -67,6 +67,7 @@ struct s_population {
 	int16_t  spawn_x             = 0;  ///< Spawn coordinates used by Guard behavior for return-to-post.
 	int16_t  spawn_y             = 0;  ///< Spawn coordinates used by Guard behavior for return-to-post.
 	int16_t  spawn_map_id        = -1; ///< Internal map ID of the designated spawn map (drift detection / death respawn).
+	uint16_t spawn_job           = 0;  ///< nostalRE: spawn-table job the quota counts; the class may have stepped down for the map (0 = its class).
 	int      respawn_timer       = -1; ///< INVALID_TIMER when no respawn pending; else timer id from add_timer. Cancel before re-adding to prevent duplicates if a shell dies twice within the respawn window.
 	uint8_t  attack_skill_cursor = 0;  ///< Round-robin index into attack_skills.
 	uint8_t  map_category        = 0;  ///< Map category at spawn (0=none, 1=town, 2=field, 3=dungeon).
