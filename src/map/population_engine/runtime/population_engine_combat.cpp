@@ -260,12 +260,19 @@ struct PopAllySearchCtx {
 };
 
 /// Scan callback: finds the living ally with the lowest HP% below hp_threshold.
+/// nostalRE: a companion spends its heals and buffs on its party, not on the shells around it.
+static bool pop_companion_ignores_ally(const map_session_data *shell, const map_session_data *ally)
+{
+	return shell->pop.companion_owner != 0 && shell->status.party_id != ally->status.party_id;
+}
+
 static int32 pop_ally_hp_scan_cb(block_list *bl, va_list ap)
 {
 	map_session_data *ally = BL_CAST(BL_PC, bl);
 	if (!ally) return 0;
 	PopAllySearchCtx *ctx = va_arg(ap, PopAllySearchCtx*);
 	if (ally->id == ctx->shell->id) return 0;
+	if (pop_companion_ignores_ally(ctx->shell, ally)) return 0;
 	// Real players are skipped UNLESS they are an arena ally of this shell
 	// (team-2 shell + real player on the same arena map = mutual allies).
 	if (!ally->state.population_combat
@@ -291,6 +298,7 @@ static int32 pop_pack_share_target_cb(block_list *bl, va_list ap)
 	int target_id = va_arg(ap, int);
 	if (ally->id == source_id) return 0;
 	if (!ally->state.population_combat) return 0;
+	if (ally->pop.companion_owner != 0) return 0; // nostalRE: picks its targets around its owner
 	if (!ally->state.active || ally->state.warping) return 0;
 	if (status_isdead(*ally)) return 0;
 	// Only share with idle shells (no current target).
@@ -352,6 +360,7 @@ static int32 pop_ally_status_scan_cb(block_list *bl, va_list ap)
 	if (!ally) return 0;
 	PopAllySearchCtx *ctx = va_arg(ap, PopAllySearchCtx*);
 	if (ally->id == ctx->shell->id) return 0;
+	if (pop_companion_ignores_ally(ctx->shell, ally)) return 0;
 	if (!ally->state.population_combat
 	    && !population_engine_arena_is_ally(ctx->shell, ally))
 		return 0;
@@ -374,6 +383,7 @@ static int32 pop_ally_any_scan_cb(block_list *bl, va_list ap)
 	if (!ally) return 0;
 	PopAllySearchCtx *ctx = va_arg(ap, PopAllySearchCtx*);
 	if (ally->id == ctx->shell->id) return 0;
+	if (pop_companion_ignores_ally(ctx->shell, ally)) return 0;
 	if (!ally->state.population_combat
 	    && !population_engine_arena_is_ally(ctx->shell, ally))
 		return 0;
@@ -1324,7 +1334,7 @@ static void population_shell_combat_process_tick(map_session_data *sd, t_tick cu
 
 	// --- PAI::TargetSwitch ---
 	// If a closer enemy exists than the current target, switch to it.
-	if ((pai & PAI::TargetSwitch) && pe.target_id != 0 && !sd->pop.mob_tracker.tracked_mobs.empty()) {
+	if ((pai & PAI::TargetSwitch) && pe.companion_owner == 0 && pe.target_id != 0 && !sd->pop.mob_tracker.tracked_mobs.empty()) {
 		int cur_dist = 999;
 		block_list *cur_bl = map_id2bl(static_cast<int>(pe.target_id));
 		if (cur_bl) cur_dist = distance_bl(sd, cur_bl);
@@ -1359,7 +1369,7 @@ static void population_shell_combat_process_tick(map_session_data *sd, t_tick cu
 	// Role: Tank — intercept mobs targeting nearby allies.
 	// When idle (no current target), scan for mobs within 12 cells that are attacking a shell ally.
 	// Redirecting aggro keeps squishier support/attacker shells safer.
-	if (shell_role == PopulationRoleType::Tank && tid_refreshed == 0) {
+	if (shell_role == PopulationRoleType::Tank && pe.companion_owner == 0 && tid_refreshed == 0) {
 		PopTankInterceptCtx tic{ sd, 0 };
 		map_foreachinrange(pop_tank_intercept_cb, sd, 12, BL_MOB, &tic);
 		if (tic.result_id != 0) {
@@ -1508,6 +1518,10 @@ static void population_shell_combat_process_tick(map_session_data *sd, t_tick cu
 		}
 		// walktobl failed or inhibited by safety wall — skip this tick.
 	}
+
+	// nostalRE: a companion does not roam or look for mobs of its own; its follow step runs after this tick.
+	if (pe.companion_owner != 0)
+		return;
 
 	// Guard behavior: when idle (no target, not walking) return to spawn position.
 	const bool is_guard = (static_cast<PopulationBehavior>(sd->pop.behavior) == PopulationBehavior::Guard);
@@ -1833,6 +1847,8 @@ static void population_shell_apply_daily_cycle(map_session_data *sd)
 {
 	if (!battle_config.population_engine_daily_cycle)
 		return;
+	if (sd->pop.companion_owner != 0) // nostalRE: out with its owner at any hour
+		return;
 	if (sd->pop.map_category != 1) // Only town shells
 		return;
 
@@ -1911,6 +1927,92 @@ void population_engine_shell_reactive_cast(map_session_data *sd)
 		}
 	}
 }
+
+// nostalRE: how a party companion picks targets and stays with its owner.
+namespace {
+constexpr int POP_COMPANION_ASSIST_CELLS = 9;  // mobs this close to the owner are its fights
+constexpr int POP_COMPANION_LEASH_CELLS = 12;  // a target further than this from the owner is dropped
+constexpr int POP_COMPANION_FOLLOW_CELLS = 3;  // idle this close to the owner
+constexpr t_tick POP_COMPANION_SCAN_MS = 400;
+
+struct PopCompanionScanCtx {
+	map_session_data *shell;
+	const map_session_data *owner;
+	int threat_id = 0, threat_dist = INT_MAX; // nearest mob on the owner
+	int near_id = 0, near_dist = INT_MAX;     // nearest mob at all
+};
+
+static int32 pop_companion_scan_cb(block_list *bl, va_list ap)
+{
+	mob_data *md = BL_CAST(BL_MOB, bl);
+	PopCompanionScanCtx *ctx = va_arg(ap, PopCompanionScanCtx *);
+	if (md == nullptr || !population_shell_check_target_for_movement(ctx->shell, bl->id))
+		return 0;
+	const auto &excluded = ctx->shell->pop.recently_cleared_targets;
+	const auto excluded_it = excluded.find(static_cast<uint32>(bl->id));
+	if (excluded_it != excluded.end() && DIFF_TICK(gettick(), excluded_it->second) < PE_SHELL_TARGET_EXCLUSION_MS)
+		return 0;
+	const int dist = distance_bl(ctx->shell, bl);
+	if (md->target_id == ctx->owner->id && dist < ctx->threat_dist) {
+		ctx->threat_id = bl->id;
+		ctx->threat_dist = dist;
+	}
+	if (dist < ctx->near_dist) {
+		ctx->near_id = bl->id;
+		ctx->near_dist = dist;
+	}
+	return 0;
+}
+
+/// The owner's own target comes first, then what is hitting the owner, then whatever is nearby.
+static void population_shell_companion_pick_target(map_session_data *sd, const map_session_data *owner, t_tick now)
+{
+	s_population &pe = sd->pop;
+
+	const int owner_target = owner->ud.target != 0 ? owner->ud.target : owner->ud.skilltarget;
+	if (owner_target != 0 && owner_target != static_cast<int>(pe.target_id) && map_id2md(owner_target) != nullptr
+		&& population_shell_check_target_for_movement(sd, owner_target)) {
+		population_shell_target_change(sd, owner_target);
+		return;
+	}
+
+	if (pe.target_id != 0) {
+		block_list *target = map_id2bl(static_cast<int>(pe.target_id));
+		if (target != nullptr && target->m == owner->m && distance_bl(owner, target) <= POP_COMPANION_LEASH_CELLS
+			&& population_shell_check_target_for_movement(sd, pe.target_id))
+			return;
+		population_shell_target_change(sd, 0);
+	}
+
+	if (DIFF_TICK(now, pe.companion_next_scan) < 0)
+		return;
+	pe.companion_next_scan = now + POP_COMPANION_SCAN_MS;
+
+	PopCompanionScanCtx ctx{ sd, owner };
+	map_foreachinrange(pop_companion_scan_cb, owner, POP_COMPANION_ASSIST_CELLS, BL_MOB, &ctx);
+	const int picked = ctx.threat_id != 0 ? ctx.threat_id : ctx.near_id;
+	if (picked != 0)
+		population_shell_target_change(sd, picked);
+}
+
+static void population_shell_companion_follow(map_session_data *sd, map_session_data *owner, t_tick now)
+{
+	s_population &pe = sd->pop;
+	if (pe.target_id != 0 || sd->ud.skilltimer != INVALID_TIMER)
+		return;
+	if (distance_bl(sd, owner) <= POP_COMPANION_FOLLOW_CELLS)
+		return;
+	if (unit_is_walking(sd) && sd->ud.target_to == owner->id)
+		return; // unit_walktobl keeps chasing a moving owner
+	// Combat owner: it may preempt a roam left over from before the shell joined
+	if (!population_shell_can_emit_movement(sd, MovementOwner::Combat, "population_shell:companion_follow"))
+		return;
+	if (unit_walktobl(sd, owner, POP_COMPANION_FOLLOW_CELLS - 1, 0))
+		pe.last_move = now;
+	else
+		pe.movement_emitted_this_tick = false; // pop_companions_maintain warps it when this goes on
+}
+} // namespace
 
 int population_engine_combat_per_tick(map_session_data *sd, bool do_skills)
 {
@@ -2019,6 +2121,20 @@ int population_engine_combat_per_tick(map_session_data *sd, bool do_skills)
 					sd->pop.skill_next_use_tick[MO_BODYRELOCATION] = current_tick + static_cast<t_tick>(snap_cd_ms);
 				}
 			}
+		}
+		population_shell_status_checkmapchange(sd);
+		return 0;
+	}
+
+	// nostalRE: a companion on another map than its owner is about to warp (pop_companions_maintain)
+	if (pe.companion_owner != 0) {
+		map_session_data *owner = population_engine_companion_owner(sd);
+		if (owner != nullptr && owner->m == sd->m && owner->prev != nullptr) {
+			population_shell_companion_pick_target(sd, owner, current_tick);
+			population_shell_combat_process_tick(sd, current_tick, do_skills);
+			population_shell_companion_follow(sd, owner, current_tick);
+			if (DIFF_TICK(gettick(), pe.last_move) > 3000)
+				sd->ud.canmove_tick = gettick();
 		}
 		population_shell_status_checkmapchange(sd);
 		return 0;

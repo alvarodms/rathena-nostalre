@@ -39,6 +39,7 @@
 #include "path.hpp"
 #include "pc.hpp"
 #include "pet.hpp"
+#include "population_engine.hpp"
 #include "quest.hpp"
 
 using namespace rathena;
@@ -3028,17 +3029,23 @@ int32 mob_dead(mob_data *md, block_list *src, int32 type)
 
 		tmpsd[i] = tsd; // record as valid damage-log entry
 
+		// nostalRE: a shell companion takes its own EXP share, but its owner holds the loot priority its damage earns,
+		// like a mercenary's: a shell cannot use items
+		map_session_data* loot_sd = tsd;
+		if( map_session_data* owner = population_engine_companion_owner( tsd ); owner != nullptr && owner->m == m )
+			loot_sd = owner;
+
 		// Gather data to determine loot priority
 		// Check if player already has an entry
 		auto it = lootdmg.begin();
 		for (; it != lootdmg.end(); ++it)
-			if (it->sd->id == tsd->id)
+			if (it->sd->id == loot_sd->id)
 				break;
 
 		if (it == lootdmg.end()) {
 			// No matching player found, create new entry for player
 			s_dmg_entry dmg_entry;
-			dmg_entry.sd = tsd;
+			dmg_entry.sd = loot_sd;
 			dmg_entry.damage = entry.dmg;
 			lootdmg.push_back(dmg_entry);
 		} else {
@@ -3183,7 +3190,7 @@ int32 mob_dead(mob_data *md, block_list *src, int32 type)
 
 				if( j == pnum ) { //Possibly add party.
 					pt[pnum].p = party_search(temp);
-					if(pt[pnum].p && pt[pnum].p->party.exp) {
+					if(pt[pnum].p && pt[pnum].p->party.exp && party_exp_share_allowed(*pt[pnum].p)) { // nostalRE: companions' level gap
 						pt[pnum].id = temp;
 						pt[pnum].base_exp = base_exp;
 						pt[pnum].job_exp = job_exp;
@@ -3220,7 +3227,7 @@ int32 mob_dead(mob_data *md, block_list *src, int32 type)
 						pc_gainexp(tmpsd[i], md, base_exp, job_exp, 0);
 					}
 				}
-				if(zeny) // zeny from mobs [Valaris]
+				if(zeny && !population_engine_is_companion(tmpsd[i])) // zeny from mobs [Valaris]; nostalRE: a shell's would be logged
 					pc_getzeny(tmpsd[i], zeny, LOG_TYPE_PICKDROP_MONSTER);
 			}
 		}
@@ -3553,6 +3560,10 @@ int32 mob_dead(mob_data *md, block_list *src, int32 type)
 				    sd = BL_CAST(BL_PC,battle_get_master(src));
 			}
 		}
+
+		// nostalRE: the owner gets the kill events and kill quests of a shell companion's kill
+		if( map_session_data* owner = population_engine_companion_owner( sd ) )
+			sd = owner;
 
 		if (sd) {
 			std::shared_ptr<s_mob_db> mission_mdb = mob_db.find(sd->mission_mobid), mob = mob_db.find(md->mob_id);

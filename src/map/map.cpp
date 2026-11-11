@@ -4382,6 +4382,8 @@ int32 inter_config_read(const char *cfgName)
 			val = cap_value(val, 0, 100);
 			inter_config.emblem_transparency_limit = val;
 		}
+		if (strcmpi(w1, "party_share_level") == 0) // nostalRE
+			inter_config.party_share_level = static_cast<uint32>(atoi(w2));
 		if( mapreg_config_read(w1,w2) )
 			continue;
 		//support the import command, just like any other config
@@ -5366,6 +5368,7 @@ bool MapServer::initialize( int32 argc, char *argv[] ){
 	inter_config.start_status_points = 48;
 	inter_config.emblem_woe_change = true;
 	inter_config.emblem_transparency_limit = 80;
+	inter_config.party_share_level = 10; // nostalRE: inter.cpp's default
 
 #ifdef MAP_GENERATOR
 	mapgenerator_get_options(argc, argv);

@@ -185,6 +185,8 @@ TIMER_FUNC(population_engine_wander_timer)
 		if (!population_engine_map_has_real_players(sd->m)) {
 			continue;
 		}
+		if (sd->pop.companion_owner != 0) // nostalRE: follows its owner instead
+			continue;
 		++examined_count;
 
 		// Cleanup stale target exclusions. The combat tick only fires near real players,

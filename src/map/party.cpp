@@ -27,6 +27,7 @@
 #include "mob.hpp"
 #include "pc.hpp"
 #include "pc_groups.hpp"
+#include "population_engine.hpp"
 #include "trade.hpp"
 
 static DBMap* party_db; // int32 party_id -> struct party_data* (releases data)
@@ -178,6 +179,9 @@ void party_created(uint32 account_id,uint32 char_id,int32 fail,int32 party_id,ch
 
 	sd->party_creating = false;
 
+	if( fail )
+		population_engine_companion_party_failed( *sd ); // nostalRE
+
 	if( !fail ) {
 		sd->status.party_id = party_id;
 		clif_party_created( *sd, 0 ); // Success message
@@ -281,6 +285,17 @@ int32 party_recv_info(struct party* sp, uint32 char_id)
 
 	p = (struct party_data*)idb_get(party_db, sp->party_id);
 
+	// nostalRE: the char-server does not know the companions. Drop their slots so the diff below does not withdraw
+	// them; population_engine_companions_reattach puts back the ones still in the companion record.
+	if( p != nullptr ) {
+		for( member_id = 0; member_id < MAX_PARTY; ++member_id ) {
+			if( !IS_POPULATION_ENGINE_ACCOUNT_ID( p->party.member[member_id].account_id ) )
+				continue;
+			memset( &p->party.member[member_id], 0, sizeof( p->party.member[0] ) );
+			memset( &p->data[member_id], 0, sizeof( p->data[0] ) );
+		}
+	}
+
 	if( p != nullptr ) { // diff members
 		int32 i;
 
@@ -343,6 +358,9 @@ int32 party_recv_info(struct party* sp, uint32 char_id)
 		p->data[member_id].sd = party_sd_check(sp->party_id, member->account_id, member->char_id);
 	}
 
+	// nostalRE: companions go back in the free slots; real members win when the party is full
+	population_engine_companions_reattach( *p );
+
 	party_check_state(p);
 
 	while( added_count > 0 ) { // new in party
@@ -374,6 +392,14 @@ int32 party_recv_info(struct party* sp, uint32 char_id)
 		sd = map_charid2sd(char_id);
 		if( sd && sd->status.party_id == sp->party_id && party_getmemberid(p,sd) == -1 )
 			sd->status.party_id = 0;// was not in the party
+	}
+
+	// nostalRE: a companion waiting for the party this info created
+	for( member_id = 0; member_id < MAX_PARTY; ++member_id ) {
+		sd = p->data[member_id].sd;
+
+		if( sd != nullptr && sd->pop.companion_pending != 0 )
+			population_engine_companion_party_ready( *sd );
 	}
 
 	return 0;
@@ -413,10 +439,9 @@ bool party_invite( map_session_data& sd, map_session_data *tsd ){
 		return false;
 	}
 
-	// nostalRE: Population Engine shells refuse invites (no char row behind them to save)
+	// nostalRE: a Population Engine shell answers at once and joins on the map server only
 	if( IS_POPULATION_ENGINE_ACCOUNT_ID( tsd->status.account_id ) ){
-		clif_party_invite_reply( sd, tsd->status.name, PARTY_REPLY_JOINMSG_REFUSE );
-		return false;
+		return population_engine_companion_invite( sd, *tsd );
 	}
 
 	if( tsd->status.disable_partyinvite ){
@@ -731,6 +756,13 @@ bool party_removemember( map_session_data& sd, uint32 account_id, const char* na
 	if( i == MAX_PARTY )
 		return false; // no such char in party
 
+	// nostalRE: the char-server does not know this member
+	if( IS_POPULATION_ENGINE_ACCOUNT_ID( account_id ) ){
+		if( p->data[i].sd != nullptr )
+			population_engine_companion_dismiss( *p->data[i].sd, true, nullptr );
+		return true;
+	}
+
 	party_trade_bound_cancel(sd);
 	intif_party_leave(p->party.party_id,account_id,p->party.member[i].char_id,p->party.member[i].name,PARTY_MEMBER_WITHDRAW_EXPEL);
 
@@ -742,6 +774,12 @@ int32 party_removemember2(map_session_data *sd,uint32 char_id,int32 party_id)
 	if( sd ) {
 		if( !sd->status.party_id )
 			return -3;
+
+		// nostalRE: the char-server does not know this member
+		if( IS_POPULATION_ENGINE_ACCOUNT_ID( sd->status.account_id ) ){
+			population_engine_companion_dismiss( *sd, true, nullptr );
+			return 1;
+		}
 
 		party_trade_bound_cancel( *sd );
 		intif_party_leave(sd->status.party_id,sd->status.account_id,sd->status.char_id,sd->status.name,PARTY_MEMBER_WITHDRAW_EXPEL);
@@ -756,6 +794,12 @@ int32 party_removemember2(map_session_data *sd,uint32 char_id,int32 party_id)
 		ARR_FIND(0,MAX_PARTY,i,p->party.member[i].char_id == char_id );
 		if( i >= MAX_PARTY )
 			return -1;
+		// nostalRE: the char-server does not know this member
+		if( IS_POPULATION_ENGINE_ACCOUNT_ID( p->party.member[i].account_id ) ){
+			if( p->data[i].sd != nullptr )
+				population_engine_companion_dismiss( *p->data[i].sd, true, nullptr );
+			return 1;
+		}
 		intif_party_leave(party_id,p->party.member[i].account_id,char_id,p->party.member[i].name,PARTY_MEMBER_WITHDRAW_EXPEL);
 		return 1;
 	}
@@ -763,6 +807,12 @@ int32 party_removemember2(map_session_data *sd,uint32 char_id,int32 party_id)
 
 /// Party member 'sd' requesting exit from party.
 bool party_leave( map_session_data& sd, bool showMessage ){
+	// nostalRE: the char-server does not know this member
+	if( IS_POPULATION_ENGINE_ACCOUNT_ID( sd.status.account_id ) ){
+		population_engine_companion_dismiss( sd, false, nullptr );
+		return true;
+	}
+
 	// Party locked.
 	if( map_getmapflag( sd.m, MF_PARTYLOCK ) ){
 		// If it was not triggered by the user itself, but from a script for example
@@ -807,6 +857,10 @@ int32 party_member_withdraw(int32 party_id, uint32 account_id, uint32 char_id, c
 {
 	map_session_data* sd = map_charid2sd(char_id);
 	struct party_data* p = party_search(party_id);
+
+	// nostalRE: a player's companions leave with them
+	if( sd != nullptr && sd->status.party_id == party_id )
+		population_engine_companions_of_owner_leave( *sd );
 
 	if( p ) {
 		map_session_data* party_sd = party_getavailablesd( p );
@@ -867,6 +921,9 @@ int32 party_broken(int32 party_id)
 
 	if( p->instance_id )
 		instance_destroy( p->instance_id );
+
+	// nostalRE: companions go back to being plain shells first (they get their fake party id back)
+	population_engine_companions_of_party_leave( party_id );
 
 	for( i = 0; i < MAX_PARTY; i++ ) {
 		if( p->data[i].sd != nullptr ) {
@@ -946,6 +1003,13 @@ int32 party_optionchanged(int32 party_id,uint32 account_id,int32 exp,int32 item,
 int32 party_changeleader(map_session_data *sd, map_session_data *tsd, struct party_data *p)
 {
 	int32 mi, tmi;
+
+	// nostalRE: a companion has no char row, so it cannot be the leader the char-server saves
+	if( tsd != nullptr && IS_POPULATION_ENGINE_ACCOUNT_ID( tsd->status.account_id ) ) {
+		if( sd != nullptr )
+			clif_displaymessage( sd->fd, msg_txt( sd, 283 ) );
+		return -3;
+	}
 
 	if ( !p ) {
 		if (!sd || !sd->status.party_id)
@@ -1090,6 +1154,13 @@ int32 party_send_logout(map_session_data *sd)
 
 	if(!sd->status.party_id)
 		return 0;
+
+	// nostalRE: a shell leaving the map server (by any path) gives its slot back; a player's companions leave too
+	if( IS_POPULATION_ENGINE_ACCOUNT_ID( sd->status.account_id ) ){
+		population_engine_companion_dismiss( *sd, false, nullptr );
+		return 0;
+	}
+	population_engine_companions_of_owner_leave( *sd );
 
 	intif_party_changemap(sd,0);
 	p=party_search(sd->status.party_id);
@@ -1258,7 +1329,7 @@ void party_exp_share(struct party_data* p, block_list* src, t_exp base_exp, t_ex
 	for (i = c = 0; i < MAX_PARTY; i++) {
 		if( (sd[c] = p->data[i].sd) == nullptr || sd[c]->m != src->m || pc_isdead(sd[c]) || (battle_config.idle_no_share && pc_isidle_party(sd[c])) )
 			continue;
-		c++;
+		c++; // nostalRE: a companion counts like any member; pc_gainexp drops its share
 	}
 	if (c < 1)
 		return;
@@ -1295,7 +1366,7 @@ void party_exp_share(struct party_data* p, block_list* src, t_exp base_exp, t_ex
 		pc_gainexp(sd[i], src, base_exp, job_exp, 0);
 #endif
 
-		if (zeny) // zeny from mobs [Valaris]
+		if (zeny && !population_engine_is_companion(sd[i])) // zeny from mobs [Valaris]; nostalRE: a shell's would be logged
 			pc_getzeny(sd[i],zeny,LOG_TYPE_PICKDROP_MONSTER);
 	}
 }
@@ -1321,6 +1392,9 @@ int32 party_share_loot(struct party_data* p, map_session_data* sd, struct item* 
 				if( (psd = p->data[i].sd) == nullptr || sd->m != psd->m || pc_isdead(psd) || (battle_config.idle_no_share && pc_isidle_party(psd)) )
 					continue;
 
+				if( IS_POPULATION_ENGINE_ACCOUNT_ID( psd->status.account_id ) ) // nostalRE: a shell's inventory is not saved
+					continue;
+
 				if (pc_additem(psd,item,item->amount,LOG_TYPE_PICKDROP_PLAYER))
 					continue; //Chosen char can't pick up loot.
 
@@ -1336,6 +1410,9 @@ int32 party_share_loot(struct party_data* p, map_session_data* sd, struct item* 
 			//Collect pick candidates
 			for (i = 0; i < MAX_PARTY; i++) {
 				if( (psd[count] = p->data[i].sd) == nullptr || psd[count]->m != sd->m || pc_isdead(psd[count]) || (battle_config.idle_no_share && pc_isidle_party(psd[count])) )
+					continue;
+
+				if( IS_POPULATION_ENGINE_ACCOUNT_ID( psd[count]->status.account_id ) ) // nostalRE: a shell's inventory is not saved
 					continue;
 
 				count++;
@@ -1463,6 +1540,110 @@ int32 party_foreachsamemap(int32 (*func)(block_list*,va_list),const map_session_
 	}
 
 	return total;
+}
+
+/// nostalRE: puts a Population Engine shell in a free member slot on this map server. Nothing about it goes to the
+/// char-server, which saves members by char ID and has no row for a shell. population_engine.cpp keeps the record of
+/// companions; party_recv_info puts their slots back from it. `notify`: tell the party now (else the caller does).
+bool party_companion_add( party_data& p, map_session_data& shell, bool notify ){
+	int32 i;
+
+	ARR_FIND( 0, MAX_PARTY, i, p.party.member[i].account_id == 0 );
+
+	if( i == MAX_PARTY ){
+		return false;
+	}
+
+	party_fill_member( p.party.member[i], shell, 0 );
+	memset( &p.data[i], 0, sizeof( p.data[i] ) );
+	p.data[i].sd = &shell;
+	shell.status.party_id = p.party.party_id;
+	party_check_state( &p );
+
+	if( notify ){
+		clif_party_member_info( p, shell );
+		clif_party_info( p );
+		clif_party_xy( shell );
+		clif_party_hp( shell );
+		clif_name_area( &shell );
+	}
+
+	return true;
+}
+
+/// nostalRE: empties a companion's map-server-only slot in party `party_id` and tells the party. The shell itself is
+/// population_engine_companion_dismiss's to reset; this does nothing when the slot is already gone.
+void party_companion_clear_slot( map_session_data& shell, int32 party_id, enum e_party_member_withdraw type ){
+	party_data* p = party_search( party_id );
+
+	if( p == nullptr ){
+		return;
+	}
+
+	int32 i;
+
+	ARR_FIND( 0, MAX_PARTY, i, p->data[i].sd == &shell );
+
+	if( i == MAX_PARTY ){
+		return;
+	}
+
+	if( shell.prev != nullptr ){
+		clif_party_xy_remove( &shell );
+	}
+
+	memset( &p->party.member[i], 0, sizeof( p->party.member[0] ) );
+	memset( &p->data[i], 0, sizeof( p->data[0] ) );
+	party_check_state( p );
+
+	map_session_data* party_sd = party_getavailablesd( p );
+
+	if( party_sd != nullptr ){
+		clif_party_withdraw( *party_sd, shell.status.account_id, shell.status.name, type, PARTY );
+	}
+}
+
+/// nostalRE: Even Share needs every member within party_share_level of each other. The char-server checks that for
+/// the members it knows; companions it never sees, so a party with one out of range shares as Each Take here.
+bool party_exp_share_allowed( const party_data& p ){
+	uint32 min_lv = UINT32_MAX, max_lv = 0;
+	bool has_companion = false;
+
+	for( int32 i = 0; i < MAX_PARTY; i++ ){
+		const map_session_data* member = p.data[i].sd;
+
+		if( member == nullptr ){
+			continue;
+		}
+
+		has_companion |= IS_POPULATION_ENGINE_ACCOUNT_ID( member->status.account_id );
+		min_lv = std::min( min_lv, member->status.base_level );
+		max_lv = std::max( max_lv, member->status.base_level );
+	}
+
+	return !has_companion || max_lv - min_lv <= inter_config.party_share_level;
+}
+
+/// nostalRE: a companion followed its owner to another map: the party window shows members' maps.
+void party_companion_moved( const map_session_data& shell ){
+	party_data* p = party_search( shell.status.party_id );
+
+	if( p == nullptr ){
+		return;
+	}
+
+	int32 i;
+
+	ARR_FIND( 0, MAX_PARTY, i, p->data[i].sd == &shell );
+
+	if( i == MAX_PARTY ){
+		return;
+	}
+
+	safestrncpy( p->party.member[i].map, mapindex_id2name( shell.mapindex ), sizeof( p->party.member[i].map ) );
+	p->data[i].x = 0;
+	p->data[i].y = 0;
+	clif_party_info( *p );
 }
 
 /*==========================================

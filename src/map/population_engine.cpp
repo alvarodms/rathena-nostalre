@@ -845,6 +845,7 @@ void population_engine_shell_release(map_session_data* sd)
 	// torn down by another path; bail before any further access.
 	if (map_id2bl(sd->id) != sd)
 		return;
+	population_engine_companion_dismiss(*sd, false, nullptr); // nostalRE: while its party id is the real one
 	sd->status.party_id = 0; // clear fake population party ID before teardown
 	g_pop_chat_next_tick.erase(sd->id);
 	population_engine_path_erase_for_pc(sd->id);
@@ -1333,7 +1334,8 @@ static void pop_release_vacant_shells(size_t max_global) {
 	while (it != g_population_engine_pcs.end()) {
 		map_session_data *sd = *it;
 		const bool candidate = sd != nullptr && sd->state.active && sd->prev != nullptr
-			&& sd->pop.arena_team == 0; // arena script owns its shells
+			&& sd->pop.arena_team == 0 // arena script owns its shells
+			&& sd->pop.companion_owner == 0; // nostalRE: its owner is here, or it is on its way to them
 		const bool keep = !candidate
 			|| (under_pressure ? g_pop_occupied_maps.count(sd->m) != 0 : pop_map_is_live(sd->m));
 		if (keep) {
@@ -1374,6 +1376,8 @@ TIMER_FUNC(population_engine_autosummon_timer)
 		if (!sd || !sd->state.active || sd->prev == nullptr)
 			continue;
 		if (sd->pop.spawn_map_id < 0 || sd->m == sd->pop.spawn_map_id)
+			continue;
+		if (sd->pop.companion_owner != 0) // nostalRE: goes where its owner goes
 			continue;
 		struct map_data *mapdata = map_getmapdata(sd->pop.spawn_map_id);
 		if (!mapdata)
@@ -1531,6 +1535,9 @@ TIMER_FUNC(population_engine_autosummon_timer)
 	return 0;
 }
 
+static void pop_companions_maintain(); // nostalRE
+static bool pop_companion_on_death(map_session_data &shell); // nostalRE
+
 /// Tick a single bot if it qualifies. Called for each block_list within range
 /// of a real PC. Dedupes via a per-pass set so two real PCs sharing view of the
 /// same bot don't double-tick it.
@@ -1593,6 +1600,8 @@ TIMER_FUNC(population_engine_global_combat_timer)
 
 	if (g_population_engine_pcs.empty())
 		return 0;
+
+	pop_companions_maintain(); // nostalRE: before the tick below, which only reaches shells near a player
 
 	// Proximity-driven tick: each real PC scans its viewport for bots.
 	// No round-robin / budget needed — work is bounded by real-player count.
@@ -1675,6 +1684,8 @@ TIMER_FUNC(population_engine_respawn_shell_timer)
 void population_engine_on_shell_death(map_session_data *sd)
 {
 	if (!sd)
+		return;
+	if (pop_companion_on_death(*sd)) // nostalRE: a companion stays down until revived (pop_companions_maintain)
 		return;
 	if (!population_engine_shell_is_mortal(sd)) {
 		ShowDebug("PopEngine death: shell %u (%s) has no Mortal flag — no respawn scheduled.\n",
@@ -3929,6 +3940,425 @@ void population_engine_combat_shell_stop(map_session_data *sd)
 	population_engine_combat_shell_teardown(sd);
 }
 
+// ============================================================
+// nostalRE: party companions
+//
+// A companion holds a member slot in its owner's real party on this map server only (party_companion_add): the party
+// window, skills and no-friendly-fire all work through the normal party code, and the char-server never hears of it.
+//
+// g_pop_companions is the one record of who is whose. Party slots follow from it: party_recv_info drops the
+// companions' slots before it takes the char-server's member list, then population_engine_companions_reattach puts
+// back the ones this record still holds. Every way out (whispered leave, expel, the owner leaving or logging out,
+// a broken party, a closed map, a full party on resync, the shell's release) goes through
+// population_engine_companion_dismiss, and pop_companions_maintain dismisses any companion whose owner, party or
+// slot is gone, so a path this misses heals on the next tick.
+//
+// A companion is a party member: its damage is its own, so it takes its share of the EXP like a player would
+// (and the share is lost, pc_gainexp), while loot priority on its kills goes to its owner (mob_dead), since a shell
+// cannot use items. It can die. Resurrection and the like work on it as on a player; if nobody revives it, it gets
+// up next to its owner when they change map or after population_engine_companion_revive_ms. Nothing brings
+// companions back after a restart.
+// ============================================================
+
+struct PopCompanion {
+	uint32 owner_char_id;
+	int32 party_id;
+	bool was_mortal; ///< the shell's own Mortal flag, given back when it leaves
+	t_tick died_at;  ///< 0 while alive
+};
+
+static std::unordered_map<int32, PopCompanion> g_pop_companions; // shell id -> companion
+
+static constexpr int POP_COMPANION_WARP_CELLS = 20;      // further from the owner than this: warp, don't walk
+static constexpr int POP_COMPANION_STUCK_CELLS = 5;      // this far and not moving for
+static constexpr t_tick POP_COMPANION_STUCK_MS = 3000;   // this long: warp too
+
+static void pop_companion_whisper(map_session_data &to, map_session_data &shell, const char *message)
+{
+	if (session_isActive(to.fd))
+		clif_wis_message(&to, shell.status.name, message, strlen(message) + 1, pc_get_group_level(&shell));
+}
+
+static int32 pop_shell_fake_party_id(const map_session_data &shell)
+{
+	return static_cast<int32>(0x70000000u | static_cast<uint32>(static_cast<uint16>(shell.m)));
+}
+
+/// Plain shells only, and not one that works here (vendors) or belongs to the arena script.
+static bool pop_companion_is_available(const map_session_data &shell)
+{
+	return battle_config.population_engine_companion_max > 0
+		&& shell.state.active && shell.prev != nullptr && !pc_isdead(const_cast<map_session_data *>(&shell))
+		&& shell.pop.arena_team == 0 && shell.pop.companion_owner == 0
+		&& !shell.state.vending && !shell.state.buyingstore
+		&& static_cast<PopulationBehavior>(shell.pop.behavior_base) != PopulationBehavior::Vendor;
+}
+
+/// A map a companion cannot follow to. An instance map is destroyed with shells on it by a path that warps them like
+/// players, and shells cannot take that warp.
+static bool pop_companion_map_is_closed(int16 m)
+{
+	struct map_data *mapdata = map_getmapdata(m);
+	return mapdata == nullptr || mapdata->instance_id != 0 || mapdata->getMapFlag(MF_BATTLEGROUND)
+		|| mapdata->getMapFlag(MF_PARTYLOCK) || mapdata_flag_gvg(mapdata);
+}
+
+bool population_engine_is_companion(const map_session_data *sd)
+{
+	return sd != nullptr && sd->pop.companion_owner != 0;
+}
+
+map_session_data *population_engine_companion_owner(const map_session_data *sd)
+{
+	if (!population_engine_is_companion(sd))
+		return nullptr;
+	return map_charid2sd(static_cast<int32>(sd->pop.companion_owner));
+}
+
+bool population_engine_companion_invite(map_session_data &owner, map_session_data &shell)
+{
+	party_data *p = party_search(owner.status.party_id);
+	if (p == nullptr)
+		return false;
+	if (!population_engine_is_population_pc(shell.id) || !pop_companion_is_available(shell)) {
+		clif_party_invite_reply(owner, shell.status.name,
+			shell.pop.companion_owner != 0 ? PARTY_REPLY_JOIN_OTHER_PARTY : PARTY_REPLY_JOINMSG_REFUSE);
+		return false;
+	}
+	if (shell.m != owner.m || pop_companion_map_is_closed(owner.m)) {
+		clif_party_invite_reply(owner, shell.status.name, PARTY_REPLY_INVALID_MAPPROPERTY_ME);
+		return false;
+	}
+
+	int32 owned = 0;
+	for (const auto &entry : g_pop_companions) {
+		if (entry.second.owner_char_id == owner.status.char_id)
+			++owned;
+	}
+	if (owned >= battle_config.population_engine_companion_max) {
+		clif_party_invite_reply(owner, shell.status.name, PARTY_REPLY_FULL);
+		return false;
+	}
+
+	if (!population_engine_combat_start_session(&shell, PopulationCombatStartMode::AutoCombat, -1, SCSTART_NOAVOID).started) {
+		clif_party_invite_reply(owner, shell.status.name, PARTY_REPLY_REJECTED);
+		return false;
+	}
+	if (pc_issit(&shell)) {
+		pc_setstand(&shell, false);
+		clif_standing(shell);
+	}
+
+	if (!party_companion_add(*p, shell, true)) {
+		clif_party_invite_reply(owner, shell.status.name, PARTY_REPLY_FULL);
+		return false;
+	}
+
+	g_pop_companions[shell.id] = PopCompanion{ owner.status.char_id, p->party.party_id, (shell.pop.flags & PSF::Mortal) != 0, 0 };
+	shell.pop.companion_owner = owner.status.char_id;
+	shell.pop.companion_next_scan = 0;
+	shell.pop.behavior = static_cast<uint8_t>(PopulationBehavior::Combat);
+	shell.pop.flags |= PSF::Mortal; // dies like a player; population_engine_on_shell_death keeps it down
+	population_shell_target_change(&shell, 0);
+
+	clif_party_invite_reply(owner, shell.status.name, PARTY_REPLY_ACCEPTED);
+	clif_hpmeter_single(owner, shell.id, shell.battle_status.hp, shell.battle_status.max_hp);
+	pop_companion_whisper(owner, shell, "Sure, lead the way!");
+	return true;
+}
+
+void population_engine_companion_dismiss(map_session_data &shell, bool expelled, const char *whisper)
+{
+	const auto it = g_pop_companions.find(shell.id);
+	if (it == g_pop_companions.end() && shell.pop.companion_owner == 0)
+		return;
+	PopCompanion c = it != g_pop_companions.end() ? it->second
+		: PopCompanion{ shell.pop.companion_owner, shell.status.party_id, true, 0 };
+	if (it != g_pop_companions.end())
+		g_pop_companions.erase(it);
+
+	map_session_data *owner = map_charid2sd(static_cast<int32>(c.owner_char_id));
+	if (whisper != nullptr && owner != nullptr)
+		pop_companion_whisper(*owner, shell, whisper);
+
+	party_companion_clear_slot(shell, c.party_id, expelled ? PARTY_MEMBER_WITHDRAW_EXPEL : PARTY_MEMBER_WITHDRAW_LEAVE);
+
+	// back to a plain shell where it stands: the demand spawn lets it go once the map empties
+	shell.pop.companion_owner = 0;
+	shell.status.party_id = pop_shell_fake_party_id(shell);
+	if (!c.was_mortal)
+		shell.pop.flags &= ~PSF::Mortal;
+	shell.pop.behavior = shell.pop.behavior_base;
+	shell.pop.spawn_map_id = shell.m;
+	shell.pop.spawn_x = shell.x;
+	shell.pop.spawn_y = shell.y;
+	population_shell_target_change(&shell, 0);
+
+	if (shell.prev == nullptr || map_id2bl(shell.id) != &shell)
+		return; // off the map or being released
+	if (pc_isdead(&shell)) {
+		if (c.was_mortal)
+			population_engine_on_shell_death(&shell); // what a plain shell's death does
+		else
+			status_revive(&shell, 100, 100);
+	} else if (static_cast<PopulationBehavior>(shell.pop.behavior_base) == PopulationBehavior::Sit) {
+		pc_setsit(&shell);
+		clif_sitting(shell);
+	}
+	clif_name_area(&shell);
+}
+
+/// The ids of the companions `pred` picks, so the caller can dismiss them while the map changes.
+template <typename Pred>
+static std::vector<int32> pop_companions_where(Pred pred)
+{
+	std::vector<int32> ids;
+	for (const auto &entry : g_pop_companions) {
+		if (pred(entry.second))
+			ids.push_back(entry.first);
+	}
+	return ids;
+}
+
+void population_engine_companions_of_owner_leave(map_session_data &owner)
+{
+	owner.pop.companion_pending = 0;
+	const uint32 char_id = owner.status.char_id;
+	for (const int32 id : pop_companions_where([char_id](const PopCompanion &c) { return c.owner_char_id == char_id; })) {
+		if (map_session_data *shell = map_id2sd(id); shell != nullptr)
+			population_engine_companion_dismiss(*shell, false, nullptr);
+		else
+			g_pop_companions.erase(id);
+	}
+}
+
+void population_engine_companions_of_party_leave(int party_id)
+{
+	for (const int32 id : pop_companions_where([party_id](const PopCompanion &c) { return c.party_id == party_id; })) {
+		if (map_session_data *shell = map_id2sd(id); shell != nullptr)
+			population_engine_companion_dismiss(*shell, true, nullptr);
+		else
+			g_pop_companions.erase(id);
+	}
+}
+
+void population_engine_companions_reattach(party_data &p)
+{
+	const int32 party_id = p.party.party_id;
+	bool any = false;
+	for (const int32 id : pop_companions_where([party_id](const PopCompanion &c) { return c.party_id == party_id; })) {
+		map_session_data *shell = map_id2sd(id);
+		if (shell == nullptr) {
+			g_pop_companions.erase(id);
+		} else if (party_companion_add(p, *shell, false)) {
+			any = true;
+		} else { // the char-server's members filled the party: they come first
+			population_engine_companion_dismiss(*shell, false, "Your party is full now, so I'll head off.");
+		}
+	}
+	if (any)
+		clif_party_info(p);
+}
+
+void population_engine_companion_party_ready(map_session_data &owner)
+{
+	const int32 id = owner.pop.companion_pending;
+	owner.pop.companion_pending = 0;
+	map_session_data *shell = map_id2sd(id);
+	if (shell == nullptr || !population_engine_is_population_pc(shell->id))
+		return;
+	// a party made for a companion shares EXP evenly: with Each Take, its kills would give the player nothing
+	if (party_data *p = party_search(owner.status.party_id); p != nullptr && p->party.exp == 0)
+		party_changeoption(&owner, 1, p->party.item);
+	party_invite(owner, shell);
+}
+
+void population_engine_companion_party_failed(map_session_data &owner)
+{
+	map_session_data *shell = map_id2sd(owner.pop.companion_pending);
+	owner.pop.companion_pending = 0;
+	if (shell != nullptr && population_engine_is_population_pc(shell->id))
+		pop_companion_whisper(owner, *shell, "We couldn't make a party. Try /organize, then invite me.");
+}
+
+/// A companion died (pc_dead): it stays down, as a player would, instead of the plain shell's respawn.
+static bool pop_companion_on_death(map_session_data &shell)
+{
+	const auto it = g_pop_companions.find(shell.id);
+	if (it == g_pop_companions.end())
+		return false;
+	it->second.died_at = gettick();
+	return true;
+}
+
+/// Puts a shell that is off the map onto (m, x, y). pc_setpos takes a unit off the map until its client answers, and
+/// a shell has no client: this does what spawning and LoadEndAck do.
+static bool pop_shell_enter_map(map_session_data &shell, int16 m, int16 x, int16 y)
+{
+	struct map_data *mapdata = map_getmapdata(m);
+	if (mapdata == nullptr)
+		return false;
+	shell.m = m;
+	shell.mapindex = mapdata->index;
+	shell.x = shell.ud.to_x = x;
+	shell.y = shell.ud.to_y = y;
+	if (map_addblock(&shell) != 0)
+		return false;
+	shell.state.debug_remove_map = 0; // as LoadEndAck: the next unit_remove_map counts it off this map's users
+	if (mapdata->users++ == 0 && battle_config.dynamic_mobs)
+		map_spawnmobs(m);
+	if (!pc_isinvisible(&shell))
+		mapdata->users_pvp++;
+	clif_spawn(&shell);
+	return true;
+}
+
+/// Moves a companion next to its owner. If the owner's map will not take it, it goes back where it was; if that fails
+/// too it is off the map, and the stale sweep releases it (population_engine_shell_release dismisses it).
+static void pop_companion_warp_to_owner(map_session_data &shell, const map_session_data &owner)
+{
+	int16 x = owner.x, y = owner.y;
+	map_search_freecell(nullptr, owner.m, &x, &y, 2, 2, 1);
+
+	const int16 old_m = shell.m, old_x = shell.x, old_y = shell.y;
+	population_shell_target_change(&shell, 0);
+	unit_remove_map_pc(&shell, CLR_TELEPORT);
+	if (!pop_shell_enter_map(shell, owner.m, x, y)) {
+		pop_shell_enter_map(shell, old_m, old_x, old_y);
+		return;
+	}
+	shell.pop.spawn_map_id = shell.m;
+	shell.pop.spawn_x = shell.x;
+	shell.pop.spawn_y = shell.y;
+	shell.pop.last_move = gettick();
+	if (shell.m != old_m)
+		party_companion_moved(shell);
+}
+
+/// Nobody revived it: it gets up next to its owner, like a player back from their save point.
+static void pop_companion_revive_at_owner(map_session_data &shell, const map_session_data &owner, PopCompanion &c)
+{
+	c.died_at = 0;
+	status_revive(&shell, 100, 100);
+	shell.ud.canmove_tick = 0;
+	shell.ud.canact_tick = 0;
+	pop_companion_warp_to_owner(shell, owner);
+}
+
+/// The part of a companion's life the proximity tick cannot do: it only runs for shells near a player.
+static void pop_companions_maintain()
+{
+	if (g_pop_companions.empty())
+		return;
+	const t_tick now = gettick();
+	for (const int32 id : pop_companions_where([](const PopCompanion &) { return true; })) {
+		const auto it = g_pop_companions.find(id);
+		if (it == g_pop_companions.end())
+			continue; // dismissed above
+		map_session_data *shell = map_id2sd(id);
+		if (shell == nullptr || !population_engine_is_population_pc(id)) {
+			g_pop_companions.erase(it); // released by a path that did not dismiss it
+			continue;
+		}
+		PopCompanion &c = it->second;
+
+		// the record must still match the world: owner online and in the party, the slot still there
+		map_session_data *owner = map_charid2sd(static_cast<int32>(c.owner_char_id));
+		party_data *p = party_search(c.party_id);
+		int32 slot = MAX_PARTY;
+		if (p != nullptr)
+			ARR_FIND(0, MAX_PARTY, slot, p->data[slot].sd == shell);
+		if (owner == nullptr || owner->status.party_id != c.party_id || slot == MAX_PARTY
+			|| shell->status.party_id != c.party_id) {
+			population_engine_companion_dismiss(*shell, false, nullptr);
+			continue;
+		}
+		if (owner->prev == nullptr || owner->state.warping || shell->prev == nullptr)
+			continue; // on their way
+
+		if (pc_isdead(shell)) {
+			if (c.died_at == 0)
+				c.died_at = now;
+			if (owner->m == shell->m && pc_isdead(owner))
+				continue; // both down: it waits with its owner
+			if (owner->m != shell->m || DIFF_TICK(now, c.died_at) >= battle_config.population_engine_companion_revive_ms) {
+				if (pop_companion_map_is_closed(owner->m))
+					population_engine_companion_dismiss(*shell, false, "I can't follow you in there. Invite me again when you're back!");
+				else
+					pop_companion_revive_at_owner(*shell, *owner, c);
+			}
+			continue;
+		}
+		c.died_at = 0; // revived by a skill or an item
+
+		if (owner->m != shell->m) {
+			if (pop_companion_map_is_closed(owner->m))
+				population_engine_companion_dismiss(*shell, false, "I can't follow you in there. Invite me again when you're back!");
+			else
+				pop_companion_warp_to_owner(*shell, *owner);
+			continue;
+		}
+		const int dist = distance_bl(shell, owner);
+		const bool stuck = dist > POP_COMPANION_STUCK_CELLS && shell->pop.target_id == 0 && !unit_is_walking(shell)
+			&& DIFF_TICK(now, shell->pop.last_move) > POP_COMPANION_STUCK_MS;
+		if (dist > POP_COMPANION_WARP_CELLS || stuck)
+			pop_companion_warp_to_owner(*shell, *owner);
+	}
+}
+
+/// Whole words only: a whisper of "empty" or "accept" is not a party request ("pt").
+static bool pop_whisper_has_word(const char *message, std::initializer_list<const char *> words)
+{
+	const char *p = message;
+	while (*p != '\0') {
+		while (*p != '\0' && !ISALNUM(static_cast<unsigned char>(*p)))
+			++p;
+		const char *start = p;
+		while (ISALNUM(static_cast<unsigned char>(*p)))
+			++p;
+		const size_t len = static_cast<size_t>(p - start);
+		for (const char *word : words) {
+			if (len != 0 && strlen(word) == len && strncmpi(start, word, len) == 0)
+				return true;
+		}
+	}
+	return false;
+}
+
+/// A whispered "party": joins the player's party, making one for them when they have none.
+static void pop_companion_on_whispered_request(map_session_data &from, map_session_data &bot)
+{
+	if (bot.pop.companion_owner == from.status.char_id) {
+		pop_companion_whisper(from, bot, "I'm already with you.");
+		return;
+	}
+	if (!pop_companion_is_available(bot)) {
+		pop_companion_whisper(from, bot, "Sorry, I'm busy right now.");
+		return;
+	}
+	if (from.status.party_id != 0) {
+		if (!party_invite(from, &bot)) // says why
+			pop_companion_whisper(from, bot, "I can't join you right now.");
+		return;
+	}
+	if (from.party_creating || from.party_joining) {
+		pop_companion_whisper(from, bot, "One moment, your party isn't ready yet.");
+		return;
+	}
+	if (bot.m != from.m) {
+		pop_companion_whisper(from, bot, "Come and find me first.");
+		return;
+	}
+	char name[NAME_LENGTH];
+	// char_name_letters holds for party names too: letters, digits and spaces
+	safesnprintf(name, sizeof(name), "%.17s Party", from.status.name);
+	from.pop.companion_pending = bot.id; // party_recv_info finishes this when the party exists
+	if (party_create(from, name, 0, 0) != 1) {
+		from.pop.companion_pending = 0;
+		pop_companion_whisper(from, bot, "I can't join you right now.");
+	}
+}
+
 void population_engine_on_whisper_to_population_pc(map_session_data* from_sd, map_session_data* bot_sd, const char* message)
 {
 	if (!from_sd || !bot_sd || !message)
@@ -3938,24 +4368,15 @@ void population_engine_on_whisper_to_population_pc(map_session_data* from_sd, ma
 	if (!population_engine_is_population_pc(bot_sd->id))
 		return;
 
-	// Party request: if the player whispers a party-related keyword the shell accepts or
-	// creates a party and invites the player back (mirrors autocombat accept_party_request).
-	const bool has_msg = message[0] != '\0';
-	if (has_msg) {
-		const char* kw_party[]  = { "party", "pt", "join", "invite" };
-		bool is_party_request = false;
-		for (const char* kw : kw_party) {
-			if (stristr(message, kw) != nullptr) {
-				is_party_request = true;
-				break;
-			}
-		}
-		if (is_party_request) {
-			// nostalRE: shells never join or lead a real party until the companions feature: a fake
-			// char ID in a char-server party has no row to save. Upstream's accept/invite cases removed.
-			clif_wis_message(from_sd, bot_sd->status.name, "Sorry, I hunt alone.", strlen("Sorry, I hunt alone.") + 1, pc_get_group_level(bot_sd));
-			return;
-		}
+	// nostalRE: the shell only ever joins the player's party, on this map server. It never leads one: a fake char ID
+	// has no row for the char-server to save. Upstream's create-a-party-and-invite-back case is gone.
+	if (bot_sd->pop.companion_owner == from_sd->status.char_id && pop_whisper_has_word(message, { "leave", "bye", "dismiss" })) {
+		population_engine_companion_dismiss(*bot_sd, false, "See you around!");
+		return;
+	}
+	if (pop_whisper_has_word(message, { "party", "pt", "join", "invite" })) {
+		pop_companion_on_whispered_request(*from_sd, *bot_sd);
+		return;
 	}
 
 	population_engine_deliver_chat_reply_locked(bot_sd, from_sd);
@@ -4331,6 +4752,9 @@ bool population_engine_arena_is_ally(const map_session_data *a, const map_sessio
 {
     if (!a || !b || a == b)
         return false;
+    // nostalRE: a companion looks after its party like an ally shell looks after the arena player
+    if (a->pop.companion_owner != 0 && a->status.party_id == b->status.party_id)
+        return true;
     return population_engine_arena_relation(
         reinterpret_cast<const block_list*>(a),
         reinterpret_cast<const block_list*>(b)) > 0;

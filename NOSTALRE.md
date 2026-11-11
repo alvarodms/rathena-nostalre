@@ -69,8 +69,23 @@ files we do not use. Our changes carry a `nostalRE` comment:
   `conf/battle_athena.conf` imports the engine conf before the app's import.
 - The FluxCP stats query (MySQL-only syntax, a table we do not ship) is compiled
   out of the SQLite build.
-- Shells never join a party: a whispered "party" gets a refusal, and
-  `party_invite` refuses shells (`src/map/party.cpp`).
+- Shells can join a player's party as companions: `party_invite` on a shell, or a
+  whispered "party" (which makes a party for a player without one); "leave" or
+  "bye" dismisses one, and so does expelling it. A companion holds a member slot
+  on the map server only (`party_companion_add`, `src/map/party.cpp`), so the
+  char-server and the database never see it; one record in
+  `population_engine.cpp` says whose it is, and every way out goes through
+  `population_engine_companion_dismiss`. It follows its owner, across maps too,
+  and helps in fights. It is a party member for EXP: Even Share pools its kills
+  with the player's (a party made by the whisper starts on Even Share), Each Take
+  keeps them its own, and its share is lost. The char-server's
+  `party_share_level` gap applies to it too (`party_exp_share_allowed`, read from
+  `inter_athena.conf` by the map server as well). Loot priority on its kills goes
+  to its owner, like a mercenary's. It can die: Resurrection and the like revive
+  it, and if nobody does it gets up next to its owner when they change map or
+  after `population_engine_companion_revive_ms`. It leaves on logout, stays out
+  of instances, and nothing brings it back after a restart.
+  `population_engine_companion_max` sets the limit per player.
 - `population_engine_max_count` 300.
 - `population_engine_map_levels` (on): autosummoned shells take their level from
   the mean level of their map's permanent monsters, with a floor by class (a

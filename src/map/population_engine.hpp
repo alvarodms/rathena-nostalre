@@ -11,6 +11,7 @@
 #include <vector>
 
 class map_session_data;
+struct party_data;
 
 struct PopulationEngine;
 
@@ -71,6 +72,27 @@ void population_engine_report_levels(int fd, int16_t map_id);
 void population_engine_combat_shell_stop(map_session_data *sd);
 /// Whisper to a population PC: send one random chat line back to the sender (no fake-client packet).
 void population_engine_on_whisper_to_population_pc(map_session_data *from_sd, map_session_data *bot_sd, const char *message);
+/// nostalRE: party companions. A shell in a real player's party holds a member slot on this map server only; the
+/// companion record in population_engine.cpp says whose it is, and party slots follow from it.
+/// party_invite on a shell lands here; replies to `owner` and returns whether the shell joined.
+bool population_engine_companion_invite(map_session_data &owner, map_session_data &shell);
+/// The one way out: the shell leaves its slot and the record, and is a plain shell again. `whisper`, when set, goes
+/// to the owner first. Does nothing for a shell that is not a companion.
+void population_engine_companion_dismiss(map_session_data &shell, bool expelled, const char *whisper);
+/// `owner` is leaving their party or the server: their companions leave too.
+void population_engine_companions_of_owner_leave(map_session_data &owner);
+/// Party `party_id` is broken: its companions leave.
+void population_engine_companions_of_party_leave(int party_id);
+/// party_recv_info took the char-server's member list: put this party's companions back in free slots.
+void population_engine_companions_reattach(struct party_data &p);
+/// The party made for a whispered request exists / could not be made.
+void population_engine_companion_party_ready(map_session_data &owner);
+void population_engine_companion_party_failed(map_session_data &owner);
+/// Whether `sd` is a party companion. `sd` may be nullptr.
+bool population_engine_is_companion(const map_session_data *sd);
+/// The player `sd` fights for when it is a companion and they are online, else nullptr. `sd` may be nullptr.
+map_session_data *population_engine_companion_owner(const map_session_data *sd);
+
 /// Map chat: any population PC on the same map whose name appears in `message` (case-insensitive) may reply overhead.
 void population_engine_on_global_chat_mention(map_session_data *from_sd, const char *message);
 

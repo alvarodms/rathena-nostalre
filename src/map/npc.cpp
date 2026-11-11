@@ -33,6 +33,7 @@
 #include "navi.hpp"
 #include "pc.hpp"
 #include "pet.hpp"
+#include "population_engine.hpp"
 #include "script.hpp" // script_config
 
 using namespace rathena;
@@ -1902,6 +1903,11 @@ int32 npc_touch_areanpc(map_session_data* sd, int16 m, int16 x, int16 y, npc_dat
 {
 	nullpo_retr(0, sd);
 	nullpo_retr(0, nd);
+
+	// nostalRE: a party companion follows its owner by its own warp (pop_companions_maintain). A portal would pc_setpos
+	// it off the map to wait for a client it does not have, and an OnTouch script would run for a shell.
+	if (population_engine_is_companion(sd))
+		return 1;
 
 	if (nd->is_invisible)
 		return 1; // a npc was found, but it is disabled

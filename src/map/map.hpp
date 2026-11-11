@@ -900,6 +900,7 @@ struct inter_conf {
 	uint32 start_status_points;
 	bool emblem_woe_change;
 	uint32 emblem_transparency_limit;
+	uint32 party_share_level; // nostalRE: the char-server's Even Share level gap, for party companions it never sees
 };
 
 extern struct inter_conf inter_config;
