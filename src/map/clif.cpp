@@ -12037,9 +12037,13 @@ void clif_parse_TakeItem(int32 fd, map_session_data *sd)
 		if (pc_cant_act(sd))
 			break;
 
+		// pc_takeitem frees the item
+		int16 x = fitem->x, y = fitem->y;
+
 		if (!pc_takeitem(sd, fitem))
 			break;
 
+		pc_takeitem_area(sd, x, y);
 		return;
 	} while (0);
 	// Client REQUIRES a fail packet or you can no longer pick items.

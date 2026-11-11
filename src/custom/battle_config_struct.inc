@@ -96,3 +96,5 @@ int32 population_engine_vending_enable;
 /// global in population_engine.cpp. This field signals that a custom pool was configured (1=yes,0=no).
 int32 population_engine_arena_custom_pool;
 int32 population_engine_path_attempts;
+/// nostalRE: picking up one floor item takes every item within this many cells of it (0: off)
+int32 pickup_area;

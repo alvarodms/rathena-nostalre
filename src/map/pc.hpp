@@ -1465,7 +1465,8 @@ void pc_putitemtocart(map_session_data *sd,int32 idx,int32 amount);
 bool pc_getitemfromcart(map_session_data *sd,int32 idx,int32 amount);
 int32 pc_cartitem_amount(map_session_data *sd,int32 idx,int32 amount);
 
-bool pc_takeitem(map_session_data *sd,flooritem_data *fitem);
+bool pc_takeitem(map_session_data *sd,flooritem_data *fitem,bool any_distance = false);
+void pc_takeitem_area(map_session_data *sd,int16 x,int16 y);
 bool pc_dropitem(map_session_data *sd,int32 n,int32 amount);
 
 bool pc_isequipped(map_session_data *sd, t_itemid nameid);

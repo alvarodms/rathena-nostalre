@@ -55,3 +55,4 @@
 { "population_engine_vending_enable",&battle_config.population_engine_vending_enable,0,0,1,},
 { "population_engine_arena_custom_pool",&battle_config.population_engine_arena_custom_pool,0,0,1,},
 { "population_engine_path_attempts",&battle_config.population_engine_path_attempts,16,1,256,},
+{ "pickup_area",&battle_config.pickup_area,0,0,14,},
