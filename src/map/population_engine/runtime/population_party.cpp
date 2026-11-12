@@ -34,6 +34,8 @@
 #include <common/showmsg.hpp>
 
 #include "../config/population_party_db.hpp"
+#include "../config/population_personality_db.hpp"
+#include "../core/population_manners.hpp"
 #include "../../chat.hpp"
 #include "../../npc.hpp"
 
@@ -197,6 +199,20 @@ bool population_party_ignores_ally(const map_session_data *shell, const map_sess
 	// the fake id is the party's alone: anyone else with the member's party id is in the player's party with it
 	return shell->pop.party_group != 0 && shell->pop.party_group != ally->pop.party_group
 		&& shell->status.party_id != ally->status.party_id;
+}
+
+int32_t population_engine_shell_party_members(const map_session_data &sd, map_session_data *out[], int32_t max)
+{
+	const PopPartyGroup *g = pop_party_group(&sd);
+	if (g == nullptr || sd.status.party_id != pop_party_fake_id(g->id))
+		return 0;
+	int32_t count = 0;
+	for (const PopPartyMember &member : g->members) {
+		map_session_data *other = pop_party_member_sd(*g, member);
+		if (other != nullptr && other->status.party_id == sd.status.party_id && count < max)
+			out[count++] = other;
+	}
+	return count;
 }
 
 bool population_party_joined(const map_session_data *sd)
@@ -674,6 +690,26 @@ static void pop_party_roamer_arrive(map_session_data *sd, const PopPartySlot &sl
 	pe.party_regroup = false;
 }
 
+/// Whether the party's battery (a Professor with Soul Exchange) is up on the map.
+static bool pop_party_has_battery(const PopPartyGroup &g)
+{
+	for (const PopPartyMember &member : g.members) {
+		const map_session_data *sd = member.duty == PopPartyDuty::Battery ? pop_party_member_sd(g, member) : nullptr;
+		if (sd != nullptr && !pc_isdead(sd))
+			return true;
+	}
+	return false;
+}
+
+/// How far from the camp a roamer hunts: its slot's Roam (or the whole map), held nearer by its temperament's Leash.
+static int pop_party_roam_leash(const map_session_data *sd, const PopPartySlot &slot)
+{
+	const map_data *mapdata = map_getmapdata(sd->m);
+	const PopTemperament *t = sd->pop.temperament.get();
+	return pop_manners::roam_leash(slot.roam, mapdata != nullptr ? mapdata->xs : 0, mapdata != nullptr ? mapdata->ys : 0,
+		t != nullptr ? t->leash : 0);
+}
+
 /// A roamer: out hunting it is a shell on its own (false: the caller plays it on), kept within its leash of
 /// the camp; when it is hurt, out of SP, out of buffs or out long enough it walks back, waits at the camp to
 /// be healed and buffed, and leaves again.
@@ -685,9 +721,10 @@ static bool pop_party_roamer_tick(map_session_data *sd, const PopPartyGroup &g, 
 	if (static_cast<PopPartyRoam>(pe.party_state) == PopPartyRoam::Hunt) {
 		if (!pop_party_should_return(sd, slot, now)) {
 			const int camp_dist = distance_xy(sd->x, sd->y, g.camp_x, g.camp_y);
-			if (camp_dist > slot.roam)
+			const int leash = pop_party_roam_leash(sd, slot);
+			if (camp_dist > leash)
 				pe.party_regroup = true;
-			else if (camp_dist <= slot.roam * 6 / 10)
+			else if (camp_dist <= leash * 6 / 10)
 				pe.party_regroup = false;
 			if (!pe.party_regroup)
 				return false;
@@ -727,8 +764,8 @@ static bool pop_party_roamer_tick(map_session_data *sd, const PopPartyGroup &g, 
 		return true;
 	}
 
-	// at the camp
-	const bool wants_rest = pop_party_pct(sd->battle_status.sp, sd->battle_status.max_sp) < slot.leave_sp
+	// at the camp: low on SP it sits down to get it back, unless a Professor is there to give it some
+	const bool wants_rest = (pop_party_pct(sd->battle_status.sp, sd->battle_status.max_sp) < slot.leave_sp && !pop_party_has_battery(g))
 		|| (pop_party_pct(sd->battle_status.hp, sd->battle_status.max_hp) < slot.leave_hp && pop_party_healer(g, sd) == nullptr);
 	pop_party_camp_tick(sd, g, me, now, do_skills, wants_rest);
 	if (pop_party_should_leave(sd, g, slot, now)) {

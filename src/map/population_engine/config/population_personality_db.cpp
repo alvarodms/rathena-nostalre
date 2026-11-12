@@ -189,6 +189,12 @@ uint64 PopulationPersonalityDatabase::parseBodyNode(const ryml::NodeRef& node)
 			this->readRange(p, "Every", t->pause_every_min, t->pause_every_max);
 			this->readRange(p, "For", t->pause_for_min, t->pause_for_max);
 		}
+		this->readRange(node, "SkillGapMs", t->skill_gap_min, t->skill_gap_max);
+		uint16_t pct = 0;
+		if (this->nodeExists(node, "KillSteal") && this->asUInt16(node, "KillSteal", pct))
+			t->kill_steal = static_cast<uint8_t>(std::min<uint16_t>(pct, 100));
+		if (this->nodeExists(node, "Leash") && this->asUInt16(node, "Leash", pct))
+			t->leash = static_cast<uint8_t>(std::min<uint16_t>(pct, 100));
 		this->readPrefers(node, t->prefers);
 		const auto existing = std::find_if(this->temperaments_.begin(), this->temperaments_.end(),
 			[&name](const std::shared_ptr<const PopTemperament>& o) { return o->name == name; });

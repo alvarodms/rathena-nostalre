@@ -61,7 +61,9 @@
 #         Build:     A Build: in population_personality.yml, taken by the members it is for.
 #                    (Default: rolled)
 #         roamers only:
-#         Roam:      Cells from the camp it hunts within. (Default: 40)
+#         Roam:      Cells from the camp it hunts within, or map: anywhere on the map. A
+#                    temperament's Leash holds it nearer (population_personality.yml).
+#                    (Default: 40)
 #         Return:    { HpBelow: 40, SpBelow: 15, Unbuffed: true, After: [min, max] } -- it goes
 #                    back to the camp below this % HP at once, and once its fight is over below
 #                    this % SP, when Blessing and Increase Agility it left with have run out,
@@ -115,7 +117,7 @@ Body:
       - Duty: roamer
         Jobs: { Knight: 3, Hunter: 3, Wizard: 2, Assassin: 2, Crusader: 1, Monk: 1, Rogue: 1, Blacksmith: 1 }
         Count: [3, 5]
-        Roam: 40
+        Roam: map
         Return: { HpBelow: 45, SpBelow: 15, Unbuffed: true, After: [120, 300] }
         Leave: { HpAbove: 90, SpAbove: 60, Wait: [10, 30] }
       - Duty: performer

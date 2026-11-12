@@ -76,6 +76,8 @@
 #       ally_dead        — a dead ally lies in skill range (Resurrection). (nostalRE)
 #       ally_sp_below    — an ally in skill range has SP% < CondValue, and less SP than
 #                          half the shell's: what Soul Exchange would leave it. (nostalRE)
+#       ally_sp_low      — an ally in skill range has SP% < CondValue (Magnificat for a member
+#                          resting its SP back). (nostalRE)
 #       sp_above         — self SP% > CondValue.
 #       self_being_cast_on — any nearby unit is casting a skill targeting this shell,
 #                          or casting a ground skill within CondValue cells (default 3).
@@ -2282,7 +2284,7 @@ Body:
       - { SkillId: AL_HEAL,          Level: 10, Rate: 10000, Target: ally, Condition: ally_hp_below, CondValue: 90 }
       - { SkillId: AL_BLESSING,      Level: 10, Rate: 10000, Target: ally, Condition: not_ally_status, CondValue: SC_BLESSING }
       - { SkillId: AL_INCAGI,        Level: 10, Rate: 10000, Target: ally, Condition: not_ally_status, CondValue: SC_INCREASEAGI }
-      - { SkillId: PR_MAGNIFICAT,    Level: 5,  Target: self, Condition: not_self_status, CondValue: SC_MAGNIFICAT }
+      - { SkillId: PR_MAGNIFICAT,    Level: 5,  Target: self, Condition: ally_sp_low, CondValue: 50 }
       - { SkillId: PR_GLORIA,        Level: 5,  Target: self, Condition: not_self_status, CondValue: SC_GLORIA }
       - { SkillId: AL_BLESSING,      Level: 10, Target: self, Condition: not_self_status, CondValue: SC_BLESSING }
       - { SkillId: AL_INCAGI,        Level: 10, Target: self, Condition: not_self_status, CondValue: SC_INCREASEAGI }

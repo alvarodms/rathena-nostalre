@@ -1070,6 +1070,7 @@ void clif_party_created( const map_session_data& sd, int32 result );
 void clif_party_member_info( const party_data& party, const map_session_data& sd );
 void clif_party_info( const party_data& party, const map_session_data* sd = nullptr );
 void clif_party_invite( const map_session_data& sd, const map_session_data& tsd );
+void clif_party_invite_as( const map_session_data& tsd, int32 party_id, const char* name ); // nostalRE
 void clif_party_invite_reply( const map_session_data& sd, const char* nick, enum e_party_invite_reply reply );
 void clif_party_option( const party_data *p, const map_session_data* sd,int32 flag );
 void clif_party_withdraw( const map_session_data& sd, uint32 account_id, const char* name, enum e_party_member_withdraw result, enum send_target target );

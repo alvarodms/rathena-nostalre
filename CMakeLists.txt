@@ -642,6 +642,7 @@ endif( INSTALL_COMPONENT_RUNTIME )
 #
 set( TARGET_LIST  CACHE INTERNAL "" )
 add_subdirectory( 3rdparty )
+enable_testing()
 add_subdirectory( src )
 
 

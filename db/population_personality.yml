@@ -51,6 +51,13 @@
 #                    one, and of incoming casts it dodges. (Default: 100)
 #     Pauses:        { Every: [min, max], For: [min, max] } in seconds -- after a kill it now and
 #                    then stands around this long; a hit ends it. (Default: none)
+#     SkillGapMs:    [min, max] -- after a skill, how long before it picks the next one, as a
+#                    player presses the next key (never less than its attack motion). (Default:
+#                    [200, 500])
+#     KillSteal:     Percent of monsters someone else is fighting that it takes anyway. Others
+#                    leave them be. (Default: 0)
+#     Leash:         A party roamer with it hunts within this percent of the map's longer side
+#                    from its camp, if its slot's Roam lets it go that far. (Default: 0, no limit)
 #     Prefers:       As for a build; the two multiply.
 #
 # Prefers, Precision and MeleeWeight count only with population_engine_scored_skills on.
@@ -71,12 +78,15 @@ Body:
     Weight: 4
     ReactionMs: [300, 600]
     Precision: [75, 90]
+    SkillGapMs: [250, 600]
     Pauses: { Every: [60, 180], For: [3, 10] }
 
   - Temperament: careful
     Weight: 2
     ReactionMs: [450, 900]
     Precision: [80, 95]
+    SkillGapMs: [400, 900]
+    Leash: 35
     Pauses: { Every: [40, 120], For: [5, 15] }
     Prefers: { defend: 150, escape: 150, heal: 130, aoe: 80 }
 
@@ -84,12 +94,15 @@ Body:
     Weight: 2
     ReactionMs: [200, 400]
     Precision: [50, 70]
+    SkillGapMs: [150, 400]
+    KillSteal: 15
     Prefers: { damage: 120, aoe: 130, defend: 50, escape: 50 }
 
   - Temperament: afk_farmer
     Weight: 1
     ReactionMs: [600, 1200]
     Precision: [60, 80]
+    SkillGapMs: [500, 1300]
     Pauses: { Every: [20, 60], For: [10, 40] }
     Prefers: { buff: 70 }
 

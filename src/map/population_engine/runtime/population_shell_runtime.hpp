@@ -42,6 +42,10 @@ void population_shell_send_message_id(map_session_data *sd, const char *type, in
 
 void population_shell_status_checkmapchange(map_session_data *sd);
 
+/// When a shell that just cast this skill picks its next one: the skill's cast and delay, then a player's pause
+/// before the next key (its temperament's SkillGapMs, no less than its attack motion).
+t_tick population_shell_next_skill_tick(map_session_data *sd, uint16 skill_id, uint16 skill_lv, t_tick now);
+
 /// Skill or melee vs mob target (minimal antispam vs. AttackCommand).
 bool population_shell_try_attack(map_session_data *sd, uint32 target_id, uint16 skill_id, uint16 skill_lv);
 

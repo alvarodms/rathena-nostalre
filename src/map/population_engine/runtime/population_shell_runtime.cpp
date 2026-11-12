@@ -6,9 +6,12 @@
 
 #include "../core/population_shell_state.hpp"
 #include "../core/population_engine_core.hpp"
+#include "../core/population_manners.hpp"
+#include "../config/population_personality_db.hpp"
 #include <algorithm>
 #include <climits>
 #include <cstdarg>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -356,6 +359,88 @@ bool population_shell_status_check_reset(map_session_data *sd, t_tick last_tick)
 	return false;
 }
 
+// ---- nostalRE: others' monsters -----------------------------------------------------------------------------
+// A shell leaves alone a monster someone else fights: one after them, one they hit (while they are by it), or
+// one another shell went for and has not hit yet (g_pop_mob_claims). Its temperament's KillSteal takes some anyway.
+
+static std::unordered_map<int32, int32> g_pop_mob_claims; ///< monster id -> the shell that went for it
+
+/// Whether `other` is with the shell: itself, or in its party. Shells on their own share their map's party id,
+/// and are not together for it.
+static bool pop_with_us(const map_session_data *sd, const map_session_data *other)
+{
+	if (other == sd)
+		return true;
+	const int32 party_id = sd->status.party_id;
+	return party_id != 0 && !pop_manners::map_wide_party(party_id) && other->status.party_id == party_id;
+}
+
+/// The player a unit fights for: the player, or the master of a homunculus, mercenary, pet or elemental.
+static map_session_data *pop_fighter_player(block_list *bl)
+{
+	if (bl == nullptr)
+		return nullptr;
+	block_list *master = bl->type == BL_PC ? bl : battle_get_master(bl);
+	return master != nullptr && master->type == BL_PC ? reinterpret_cast<map_session_data *>(master) : nullptr;
+}
+
+/// The shell that went for `mob_id` before `sd` and still fights it, if any.
+static const map_session_data *pop_mob_claimer(const map_session_data *sd, int32 mob_id, int16 m)
+{
+	const auto it = g_pop_mob_claims.find(mob_id);
+	if (it == g_pop_mob_claims.end() || it->second == sd->id)
+		return nullptr;
+	const map_session_data *other = map_id2sd(it->second);
+	if (other == nullptr || other->pop.target_id != static_cast<uint32>(mob_id) || other->m != m || pc_isdead(other)) {
+		g_pop_mob_claims.erase(it);
+		return nullptr;
+	}
+	return other;
+}
+
+/// Whether the shell may fight the monster (pop_manners::mob_open).
+static bool pop_shell_mob_open(map_session_data *sd, const mob_data *md)
+{
+	pop_manners::MobClaim claim;
+	if (md->target_id != 0) {
+		const map_session_data *on = pop_fighter_player(map_id2bl(md->target_id));
+		if (on != nullptr && pop_with_us(sd, on))
+			claim.on_us = true;
+		else if (on != nullptr && !pc_isdead(on))
+			claim.foreign = true;
+	}
+	if (claim.on_us)
+		return true;
+	for (const s_dmglog &log : md->dmglog) {
+		if (log.id == static_cast<int32>(sd->status.char_id)) {
+			claim.hit_by_us = true;
+			continue;
+		}
+		const map_session_data *hitter = map_charid2sd(log.id);
+		if (hitter != nullptr && hitter->m == md->m && !pc_isdead(hitter) && distance_bl(hitter, md) <= AREA_SIZE
+			&& !pop_with_us(sd, hitter))
+			claim.foreign = true;
+	}
+	if (const map_session_data *other = pop_mob_claimer(sd, md->id, md->m); other != nullptr && !pop_with_us(sd, other))
+		claim.foreign = true;
+	const PopTemperament *t = sd->pop.temperament.get();
+	return pop_manners::mob_open(claim, t != nullptr && pop_manners::kill_steal_roll(sd->id, md->id, t->kill_steal));
+}
+
+/// The shell goes for the monster: other shells leave it to it until it hits it.
+static void pop_shell_claim_mob(map_session_data *sd, int32 mob_id)
+{
+	if (map_id2md(mob_id) == nullptr || pop_mob_claimer(sd, mob_id, sd->m) != nullptr)
+		return;
+	if (g_pop_mob_claims.size() > 4096) { // monsters long dead, shells gone
+		for (auto it = g_pop_mob_claims.begin(); it != g_pop_mob_claims.end();) {
+			const map_session_data *other = map_id2sd(it->second);
+			it = other == nullptr || other->pop.target_id != static_cast<uint32>(it->first) ? g_pop_mob_claims.erase(it) : std::next(it);
+		}
+	}
+	g_pop_mob_claims[mob_id] = sd->id;
+}
+
 bool population_shell_check_target(map_session_data *sd, unsigned int id)
 {
 	if (!sd || id == 0)
@@ -387,7 +472,7 @@ bool population_shell_check_target(map_session_data *sd, unsigned int id)
 		return false;
 	if (!battle_check_range(sd, bl, AREA_SIZE))
 		return false;
-	return true;
+	return pop_shell_mob_open(sd, md);
 }
 
 bool population_shell_check_target_for_movement(map_session_data *sd, unsigned int id)
@@ -406,7 +491,7 @@ bool population_shell_check_target_for_movement(map_session_data *sd, unsigned i
 		return false;
 	if (battle_config.ksprotection && mob_ksprotected(sd, bl))
 		return false;
-	return battle_check_target(sd, bl, BCT_ENEMY) > 0;
+	return battle_check_target(sd, bl, BCT_ENEMY) > 0 && pop_shell_mob_open(sd, md);
 }
 
 int population_shell_mob_search_sub_cached(block_list *bl, va_list ap)
@@ -542,6 +627,7 @@ void population_shell_target_change(map_session_data *sd, int id)
 		if (pe.reaction_ms > 0 && pe.target_id == 0)
 			pe.react_until = gettick() + pe.reaction_ms * rnd_value(70, 130) / 100;
 		pe.target_lost_tick = 0;
+		pop_shell_claim_mob(sd, id); // nostalRE
 		pe.move_fail_count = 0;
 		pe.attack_fail_count = 0;
 		if (pe.target_id > 0 && pe.target_id != static_cast<uint32>(id))
@@ -981,6 +1067,19 @@ void population_shell_status_checkmapchange(map_session_data *sd)
 	}
 }
 
+t_tick population_shell_next_skill_tick(map_session_data *sd, uint16 skill_id, uint16 skill_lv, t_tick now)
+{
+	t_tick delay = skill_get_delay(skill_id, skill_lv);
+	const int min_delay = battle_config.population_engine_shell_attack_skill_delay_ms;
+	if (min_delay > 0 && delay < min_delay)
+		delay = min_delay;
+	// nostalRE: then a player's moment to press the next key (pop_manners::skill_gap_ms)
+	const PopTemperament *t = sd->pop.temperament.get();
+	const int gap = pop_manners::skill_gap_ms(t != nullptr ? t->skill_gap_min : 200, t != nullptr ? t->skill_gap_max : 500,
+		static_cast<int>(rnd() % 100), status_get_amotion(sd));
+	return now + skill_get_cast(skill_id, skill_lv) + delay + gap;
+}
+
 bool population_shell_try_attack(map_session_data *sd, uint32 target_id, uint16 skill_id, uint16 skill_lv)
 {
 	if (!sd || !target_id)
@@ -1090,13 +1189,7 @@ bool population_shell_try_attack(map_session_data *sd, uint32 target_id, uint16 
 
 		if (skill_used) {
 			t_tick last_tick = now;
-			t_tick skill_delay = skill_get_delay(skill_id, skill_lv);
-			t_tick cast_time = skill_get_cast(skill_id, skill_lv);
-			int min_delay = battle_config.population_engine_shell_attack_skill_delay_ms;
-			if (min_delay > 0 && skill_delay < min_delay)
-				pe.skill_cd = last_tick + min_delay + cast_time;
-			else
-				pe.skill_cd = last_tick + skill_delay + cast_time;
+			pe.skill_cd = population_shell_next_skill_tick(sd, skill_id, skill_lv, last_tick);
 			pe.last_attack = last_tick;
 			pe.attack_fail_count = 0;
 			sd->pop.last_cast_skill_id = skill_id; // AfterSkill condition tracking
@@ -1325,13 +1418,7 @@ bool population_shell_try_arena_attack(map_session_data *sd, uint32 target_id, u
 
 		if (skill_used) {
 			t_tick last_tick = now;
-			t_tick skill_delay = skill_get_delay(skill_id, skill_lv);
-			t_tick cast_time   = skill_get_cast(skill_id, skill_lv);
-			int min_delay = battle_config.population_engine_shell_attack_skill_delay_ms;
-			if (min_delay > 0 && skill_delay < min_delay)
-				pe.skill_cd = last_tick + min_delay + cast_time;
-			else
-				pe.skill_cd = last_tick + skill_delay + cast_time;
+			pe.skill_cd = population_shell_next_skill_tick(sd, skill_id, skill_lv, last_tick);
 			pe.last_attack    = last_tick;
 			pe.attack_fail_count = 0;
 		} else {

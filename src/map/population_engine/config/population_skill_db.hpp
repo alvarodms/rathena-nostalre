@@ -54,6 +54,7 @@ enum class PopSkillCondition : uint8_t {
 	EnemyIsPlayer       = 35, ///< nostalRE: target is a player (BL_PC), so a skill like Dispell is kept for PvP.
 	AllyDead            = 36, ///< nostalRE: a dead ally lies in skill range (Resurrection).
 	AllySpBelow         = 37, ///< nostalRE: an ally in skill range has SP% < cond_value_num and less SP than half the shell's (Soul Exchange).
+	AllySpLow           = 38, ///< nostalRE: an ally in skill range has SP% < cond_value_num (Magnificat for a member resting).
 };
 
 /// nostalRE: what a skill is for, which the scored picker (population_engine_scored_skills) weighs by.
