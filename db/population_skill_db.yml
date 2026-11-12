@@ -72,6 +72,7 @@
 #                          (numeric 0–9 also accepted).
 #       ally_count_nearby — >= CondValue allies within detection range.
 #       enemy_is_boss    — target is an MVP/boss monster.
+#       enemy_is_player  — target is a player (PvP), not a monster. (nostalRE)
 #       sp_above         — self SP% > CondValue.
 #       self_being_cast_on — any nearby unit is casting a skill targeting this shell,
 #                          or casting a ground skill within CondValue cells (default 3).
@@ -647,7 +648,7 @@ Body:
       - { SkillId: MG_COLDBOLT,         Level: 10, Rate: 8000  }
       - { SkillId: WZ_EARTHSPIKE,       Level: 5,  Rate: 7000  }
       - { SkillId: WZ_HEAVENDRIVE,      Level: 5,  Rate: 6000, Condition: enemy_count_nearby, CondValue: 2 }
-      - { SkillId: SA_DISPELL,          Level: 5,  Rate: 8000  }
+      - { SkillId: SA_DISPELL,          Level: 5,  Rate: 8000, Condition: enemy_is_player }  # nostalRE: no use on monsters
       - { SkillId: SA_FLAMELAUNCHER,    Level: 5,  Rate: 5000, Target: ally, Condition: not_ally_status, CondValue: SC_PROPERTYFIRE }
       - { SkillId: SA_FROSTWEAPON,      Level: 5,  Rate: 5000, Target: ally, Condition: not_ally_status, CondValue: SC_PROPERTYWATER }
       - { SkillId: SA_LIGHTNINGLOADER,  Level: 5,  Rate: 5000, Target: ally, Condition: not_ally_status, CondValue: SC_PROPERTYWIND }
@@ -1114,7 +1115,7 @@ Body:
       - { SkillId: MG_FIREBOLT,        Level: 10, Rate: 5000  }
       - { SkillId: WZ_EARTHSPIKE,      Level: 5,  Rate: 5000  }
       - { SkillId: WZ_HEAVENDRIVE,     Level: 5,  Rate: 5000, Condition: enemy_count_nearby, CondValue: 2 }
-      - { SkillId: SA_DISPELL,         Level: 5,  Rate: 5000,  Cooldown: 3000 }
+      - { SkillId: SA_DISPELL,         Level: 5,  Rate: 5000,  Cooldown: 3000, Condition: enemy_is_player }  # nostalRE: no use on monsters
       - { SkillId: PF_SOULBURN,        Level: 5,  Rate: 5000,  Cooldown: 8000 }
       - { SkillId: PF_MINDBREAKER,     Level: 5,  Rate: 5000,  Cooldown: 10000, Condition: not_enemy_status, CondValue: SC_MINDBREAKER }
       - { SkillId: SA_FLAMELAUNCHER,   Level: 5,  Rate: 5000, Target: ally, Condition: not_ally_status, CondValue: SC_PROPERTYFIRE }
@@ -1816,7 +1817,7 @@ Body:
       - { SkillId: MG_COLDBOLT,        Level: 10, Rate: 7000  }
       - { SkillId: SO_ARRULLO,         Level: 5,  Rate: 5000  }
       - { SkillId: SO_VACUUM_EXTREME,  Level: 5,  Rate: 5000, Condition: enemy_count_nearby, CondValue: 2 }
-      - { SkillId: SA_DISPELL,         Level: 5,  Rate: 6000  }
+      - { SkillId: SA_DISPELL,         Level: 5,  Rate: 6000, Condition: enemy_is_player }  # nostalRE: no use on monsters
       - { SkillId: SO_WARMER,          Level: 5,  Rate: 5000, Target: self }
       - { SkillId: SO_FIREWALK,        Level: 5,  Rate: 4000, Target: self }
       - { SkillId: SO_ELECTRICWALK,    Level: 5,  Rate: 4000, Target: self }
@@ -1851,7 +1852,7 @@ Body:
       - { SkillId: MG_COLDBOLT,        Level: 10, Rate: 7000  }
       - { SkillId: SO_ARRULLO,         Level: 5,  Rate: 5000  }
       - { SkillId: SO_VACUUM_EXTREME,  Level: 5,  Rate: 5000, Condition: enemy_count_nearby, CondValue: 2 }
-      - { SkillId: SA_DISPELL,         Level: 5,  Rate: 6000  }
+      - { SkillId: SA_DISPELL,         Level: 5,  Rate: 6000, Condition: enemy_is_player }  # nostalRE: no use on monsters
       - { SkillId: SO_WARMER,          Level: 5,  Rate: 5000, Target: self }
       - { SkillId: SO_FIREWALK,        Level: 5,  Rate: 4000, Target: self }
       - { SkillId: SO_ELECTRICWALK,    Level: 5,  Rate: 4000, Target: self }

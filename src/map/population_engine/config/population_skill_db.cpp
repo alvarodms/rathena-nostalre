@@ -54,6 +54,7 @@ static const std::unordered_map<std::string, PopSkillCondition> s_cond_name_map 
 	{ "after_skill",          PopSkillCondition::AfterSkill         },
 	{ "damaged_gt",           PopSkillCondition::DamagedGt          },
 	{ "skill_used",           PopSkillCondition::SkillUsed          },
+	{ "enemy_is_player",      PopSkillCondition::EnemyIsPlayer      }, // nostalRE
 };
 
 // ---------------------------------------------------------------------------
