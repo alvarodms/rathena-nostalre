@@ -8495,8 +8495,9 @@ void pc_gainexp(map_session_data *sd, block_list *src, t_exp base_exp, t_exp job
 	if(sd->prev == nullptr || pc_isdead(sd))
 		return;
 
-	// nostalRE: a party companion takes its share of the EXP like a member, and the share is lost: a shell is not saved
-	if (population_engine_is_companion(sd))
+	// nostalRE: a shell in a player's party (a companion, a shell party's member) takes its share of the EXP like a
+	// member, and the share is lost: a shell is not saved
+	if (population_engine_shell_in_player_party(sd))
 		return;
 
 	if (!(exp_flag&2)) {

@@ -394,11 +394,11 @@ int32 party_recv_info(struct party* sp, uint32 char_id)
 			sd->status.party_id = 0;// was not in the party
 	}
 
-	// nostalRE: a companion waiting for the party this info created
+	// nostalRE: a companion, or a shell party the player asked to join, waiting for the party this info created
 	for( member_id = 0; member_id < MAX_PARTY; ++member_id ) {
 		sd = p->data[member_id].sd;
 
-		if( sd != nullptr && sd->pop.companion_pending != 0 )
+		if( sd != nullptr && ( sd->pop.companion_pending != 0 || sd->pop.party_join_pending != 0 ) )
 			population_engine_companion_party_ready( *sd );
 	}
 
@@ -1329,7 +1329,7 @@ void party_exp_share(struct party_data* p, block_list* src, t_exp base_exp, t_ex
 	for (i = c = 0; i < MAX_PARTY; i++) {
 		if( (sd[c] = p->data[i].sd) == nullptr || sd[c]->m != src->m || pc_isdead(sd[c]) || (battle_config.idle_no_share && pc_isidle_party(sd[c])) )
 			continue;
-		c++; // nostalRE: a companion counts like any member; pc_gainexp drops its share
+		c++; // nostalRE: a shell counts like any member; pc_gainexp drops its share
 	}
 	if (c < 1)
 		return;
@@ -1366,7 +1366,7 @@ void party_exp_share(struct party_data* p, block_list* src, t_exp base_exp, t_ex
 		pc_gainexp(sd[i], src, base_exp, job_exp, 0);
 #endif
 
-		if (zeny && !population_engine_is_companion(sd[i])) // zeny from mobs [Valaris]; nostalRE: a shell's would be logged
+		if (zeny && !population_engine_shell_in_player_party(sd[i])) // zeny from mobs [Valaris]; nostalRE: a shell's would be logged
 			pc_getzeny(sd[i],zeny,LOG_TYPE_PICKDROP_MONSTER);
 	}
 }

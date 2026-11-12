@@ -3,7 +3,13 @@
 //
 // A party is a record here (g_pop_parties) and a party id of its own on its members, in the range of the fake
 // ids shells carry (population_engine_spawn_shell), so party skills (songs, Gloria, Devotion) reach the party
-// and not the shells around it. Nothing of it is a real party: no player can be in it.
+// and not the shells around it. Nothing of it is a real party.
+//
+// A player can join one (population_engine.cpp's pop_party_on_join_request): a real party is made for them and
+// the members take companion slots in it (party_companion_add), so the player sees their HP and shares EXP,
+// and the party's skills reach them. The members keep their duties; they do not follow the player. The join
+// ends when the player leaves the map, logs out or leaves the party (population_party_unjoin), and the
+// members go back to the party's own id. population_party_check_joins puts right any path that missed it.
 //
 // population_engine.cpp makes the parties, rolls who is in them and has the spawner fill them (its "shell
 // parties" section). This file is what a member does once it is on the map: population_party_member_tick, from
@@ -43,6 +49,7 @@ struct PopPartyMember {
 	int16 spot_x = 0, spot_y = 0; ///< its cell at the camp (0: not picked yet)
 	int16 pair = -1;         ///< performer: the member it stands next to
 	uint8_t spawn_fails = 0;
+	bool out = false;        ///< out of the joined player's party (expelled, or no room): it stays out until the join ends
 };
 
 struct PopPartyGroup {
@@ -52,6 +59,8 @@ struct PopPartyGroup {
 	std::shared_ptr<const PopPartyTemplate> tpl;
 	std::vector<PopPartyMember> members;
 	std::string title;       ///< the leader's chat room (empty: none)
+	int32 party_id = 0;      ///< the real party of the player who joined it (0: nobody joined)
+	uint32 player_char_id = 0;
 };
 
 /// A place in a party for the spawner to fill.
@@ -109,6 +118,43 @@ static map_session_data *pop_party_member_sd(const PopPartyGroup &g, const PopPa
 	return sd;
 }
 
+/// The player who joined the party, when they are on its map.
+static map_session_data *pop_party_player(const PopPartyGroup &g)
+{
+	if (g.party_id == 0)
+		return nullptr;
+	map_session_data *sd = map_charid2sd(static_cast<int32>(g.player_char_id));
+	if (sd == nullptr || sd->m != g.m || sd->prev == nullptr || sd->status.party_id != g.party_id)
+		return nullptr;
+	return sd;
+}
+
+/// Whether the member holds its slot in the joined player's party.
+static bool pop_party_in_real_party(const PopPartyGroup &g, const map_session_data &sd)
+{
+	if (g.party_id == 0 || sd.status.party_id != g.party_id)
+		return false;
+	const party_data *p = party_search(g.party_id);
+	if (p == nullptr)
+		return false;
+	for (int32 i = 0; i < MAX_PARTY; i++)
+		if (p->data[i].sd == &sd)
+			return true;
+	return false;
+}
+
+/// The member takes its party id: its slot in the joined player's party, else the party's own.
+static void pop_party_take_party_id(map_session_data &sd, const PopPartyGroup &g, const PopPartyMember &me)
+{
+	if (pop_party_in_real_party(g, sd))
+		return;
+	if (g.party_id != 0 && !me.out) {
+		if (party_data *p = party_search(g.party_id); p != nullptr && party_companion_add(*p, sd, true))
+			return;
+	}
+	sd.status.party_id = pop_party_fake_id(g.id);
+}
+
 /// Acolytes and Priests; Monks are their class too but do not heal.
 static bool pop_party_job_heals(uint16_t job)
 {
@@ -148,7 +194,15 @@ bool population_party_holds(const map_session_data *sd)
 
 bool population_party_ignores_ally(const map_session_data *shell, const map_session_data *ally)
 {
-	return shell->pop.party_group != 0 && shell->pop.party_group != ally->pop.party_group;
+	// the fake id is the party's alone: anyone else with the member's party id is in the player's party with it
+	return shell->pop.party_group != 0 && shell->pop.party_group != ally->pop.party_group
+		&& shell->status.party_id != ally->status.party_id;
+}
+
+bool population_party_joined(const map_session_data *sd)
+{
+	const PopPartyGroup *g = pop_party_group(sd);
+	return g != nullptr && g->party_id != 0 && sd->status.party_id == g->party_id;
 }
 
 // ---- the camp: where it is, and each member's cell at it ----------------------------------------------------
@@ -273,10 +327,25 @@ static void pop_party_pick_spot(PopPartyGroup &g, size_t index)
 
 // ---- joining and leaving ---------------------------------------------------------------------------------
 
+/// The leader's chat room closes: whoever is in it leaves first, or the room would pass to them.
+static void pop_party_close_room(map_session_data *sd)
+{
+	const chat_data *cd = sd->chatID != 0 ? static_cast<const chat_data *>(map_id2bl(sd->chatID)) : nullptr;
+	if (cd != nullptr && cd->owner == sd) {
+		for (int guard = 0; cd->users > 1 && guard < MAX_CHAT_USERS; guard++) {
+			map_session_data *other = cd->usersd[cd->users - 1];
+			if (other == sd || chat_leavechat(other, false) != 0)
+				break;
+		}
+	}
+	if (sd->chatID != 0)
+		chat_leavechat(sd, false);
+}
+
 static void pop_party_get_up(map_session_data *sd)
 {
 	if (sd->chatID != 0)
-		chat_leavechat(sd, false);
+		pop_party_close_room(sd);
 	if (pc_issit(sd) && pc_setstand(sd, false))
 		clif_standing(*sd);
 }
@@ -316,7 +385,8 @@ static void population_party_attach(map_session_data &sd, uint32 group_id, size_
 	pe.spawn_y = me.spot_y;
 	pe.flags |= PSF::Mortal; // a party is about heals: its members can be hurt
 	pe.behavior = pe.behavior_base = static_cast<uint8_t>(PopulationBehavior::Combat);
-	sd.status.party_id = pop_party_fake_id(g.id);
+	me.out = false;
+	pop_party_take_party_id(sd, g, me); // a member that comes after a player joined is in their party too
 	population_engine_path_erase_for_pc(sd.id); // no wandering
 
 	// its slot's skill set, whatever the spawn seeded from its job
@@ -339,6 +409,8 @@ static void population_party_detach(map_session_data &sd)
 			if (member.shell_id == sd.id)
 				member.shell_id = 0;
 	}
+	if (sd.status.party_id != 0)
+		party_companion_clear_slot(sd, sd.status.party_id, PARTY_MEMBER_WITHDRAW_LEAVE); // a joined player's party
 	sd.pop.party_group = 0;
 	sd.pop.party_duty = 0;
 	sd.pop.party_state = 0;
@@ -349,6 +421,8 @@ static void population_party_detach(map_session_data &sd)
 /// The party is over: members still on the map play on as shells on their own.
 static void population_party_disband(PopPartyGroup &g)
 {
+	g.party_id = 0; // population_party_detach empties their slots in a joined player's party
+	g.player_char_id = 0;
 	for (PopPartyMember &member : g.members) {
 		map_session_data *sd = member.shell_id != 0 ? map_id2sd(member.shell_id) : nullptr;
 		if (sd == nullptr || sd->pop.party_group != g.id)
@@ -407,8 +481,8 @@ struct PopPartyDefendCtx {
 	int best_id = 0, best_dist = INT_MAX;
 };
 
-/// The nearest monster that is after one of the party's members at the camp, or one on its way back to it.
-/// What a roamer is hunting next to the camp is the roamer's.
+/// The nearest monster that is after one of the party's members at the camp, or one on its way back to it,
+/// or after the player who joined it. What a roamer is hunting next to the camp is the roamer's.
 static int32 pop_party_defend_scan_cb(block_list *bl, va_list ap)
 {
 	mob_data *md = BL_CAST(BL_MOB, bl);
@@ -416,7 +490,10 @@ static int32 pop_party_defend_scan_cb(block_list *bl, va_list ap)
 	if (md == nullptr || md->target_id == 0)
 		return 0;
 	const map_session_data *victim = map_id2sd(md->target_id);
-	if (victim == nullptr || victim->pop.party_group != ctx->group->id || !population_party_holds(victim))
+	if (victim == nullptr)
+		return 0;
+	const bool member = victim->pop.party_group == ctx->group->id && population_party_holds(victim);
+	if (!member && victim != pop_party_player(*ctx->group))
 		return 0;
 	if (!population_shell_check_target_for_movement(ctx->shell, bl->id))
 		return 0;
@@ -463,8 +540,8 @@ static void pop_party_settle(map_session_data *sd, const PopPartyGroup &g, const
 	const bool leader_idles = me.duty == PopPartyDuty::Anchor && !pop_party_member_heals(g, me);
 	if (g.tpl->sit && (leader_idles || wants_rest))
 		pop_party_sit(sd);
-	if (me.duty == PopPartyDuty::Anchor && !g.title.empty() && sd->chatID == 0)
-		chat_createpcchat(sd, g.title.c_str(), "", 20, true);
+	if (me.duty == PopPartyDuty::Anchor && !g.title.empty() && g.party_id == 0 && sd->chatID == 0)
+		chat_createpcchat(sd, g.title.c_str(), "", 20, true); // not while a player is with them
 }
 
 /// Back to its cell after a fight; settles once it is there.
@@ -490,8 +567,8 @@ static bool pop_party_can_raise(const map_session_data *sd)
 	return std::any_of(skills.begin(), skills.end(), [](const PopulationShellCombatSkill &sk) { return sk.skill_id == ALL_RESURRECTION; });
 }
 
-/// A healer with Resurrection walks up to a member who died in its sight, as far as the skill reaches, and
-/// stays there until the member is up. False: nobody to raise.
+/// A healer with Resurrection walks up to a member who died in its sight, or to the player who joined the party,
+/// as far as the skill reaches, and stays there until they are up. False: nobody to raise.
 static bool pop_party_go_raise(map_session_data *sd, const PopPartyGroup &g, const PopPartyMember &me, t_tick now)
 {
 	static constexpr int REACH = 7; // Resurrection's range is 9
@@ -499,16 +576,18 @@ static bool pop_party_go_raise(map_session_data *sd, const PopPartyGroup &g, con
 		return false;
 	const map_session_data *fallen = nullptr;
 	int best = AREA_SIZE + 1;
-	for (const PopPartyMember &member : g.members) {
-		const map_session_data *other = pop_party_member_sd(g, member);
+	const auto consider = [&](const map_session_data *other) {
 		if (other == nullptr || other == sd || !pc_isdead(other))
-			continue;
+			return;
 		const int dist = distance_bl(sd, other);
 		if (dist < best) {
 			best = dist;
 			fallen = other;
 		}
-	}
+	};
+	for (const PopPartyMember &member : g.members)
+		consider(pop_party_member_sd(g, member));
+	consider(pop_party_player(g));
 	if (fallen == nullptr)
 		return false;
 	sd->pop.party_idle_since = 0;
@@ -703,6 +782,116 @@ static void population_party_tick_unseen(std::unordered_set<int32> &ticked)
 	}
 }
 
+// ---- a player in the party -------------------------------------------------------------------------------
+
+static PopPartyGroup *pop_party_find(uint32 group_id)
+{
+	const auto it = g_pop_parties.find(group_id);
+	return it != g_pop_parties.end() ? &it->second : nullptr;
+}
+
+/// The player's party `p` takes the party's members in, as companions it does not lead: they keep their duties.
+/// The leader closes their chat room while the player is with them.
+static void population_party_join(PopPartyGroup &g, party_data &p, map_session_data &player)
+{
+	g.party_id = p.party.party_id;
+	g.player_char_id = player.status.char_id;
+	for (PopPartyMember &member : g.members) {
+		member.out = false;
+		map_session_data *sd = pop_party_member_sd(g, member);
+		if (sd == nullptr)
+			continue; // not on the map yet: population_party_attach puts it in
+		if (member.duty == PopPartyDuty::Anchor && sd->chatID != 0)
+			pop_party_close_room(sd);
+		if (!party_companion_add(p, *sd, true))
+			member.out = true; // no room: it stays the party's own
+	}
+}
+
+/// The player is gone: the members still in their party go back to the party's own id.
+static void population_party_unjoin(PopPartyGroup &g)
+{
+	const int32 party_id = g.party_id;
+	g.party_id = 0;
+	g.player_char_id = 0;
+	for (PopPartyMember &member : g.members) {
+		member.out = false;
+		map_session_data *sd = member.shell_id != 0 ? map_id2sd(member.shell_id) : nullptr;
+		if (sd == nullptr || sd->pop.party_group != g.id)
+			continue;
+		if (party_id != 0 && sd->status.party_id == party_id)
+			party_companion_clear_slot(*sd, party_id, PARTY_MEMBER_WITHDRAW_LEAVE);
+		sd->status.party_id = pop_party_fake_id(g.id);
+		if (sd->prev != nullptr)
+			clif_name_area(sd);
+	}
+}
+
+/// The player expelled a member (or it left their party some other way): it stays at the camp in the
+/// party's own id until the join ends. False: the shell is no joined party's member.
+static bool population_party_member_leaves(map_session_data &sd, bool expelled)
+{
+	PopPartyGroup *g = pop_party_group(&sd);
+	const int index = g != nullptr ? pop_party_member_index(*g, &sd) : -1;
+	if (index < 0 || g->party_id == 0 || sd.status.party_id != g->party_id)
+		return false;
+	g->members[index].out = true;
+	party_companion_clear_slot(sd, g->party_id, expelled ? PARTY_MEMBER_WITHDRAW_EXPEL : PARTY_MEMBER_WITHDRAW_LEAVE);
+	sd.status.party_id = pop_party_fake_id(g->id);
+	if (sd.prev != nullptr)
+		clif_name_area(&sd);
+	return true;
+}
+
+/// The party a player joined is gone from under them (they left it, it broke up) or they logged out:
+/// `char_id` 0 matches by party alone.
+static void population_party_unjoin_where(uint32 char_id, int32 party_id)
+{
+	for (auto &entry : g_pop_parties) {
+		PopPartyGroup &g = entry.second;
+		if (g.party_id != 0 && (char_id != 0 ? g.player_char_id == char_id : g.party_id == party_id))
+			population_party_unjoin(g);
+	}
+}
+
+/// party_recv_info dropped every shell's slot: the members of a party the player joined take theirs back.
+/// True: any did (the caller sends the party window).
+static bool population_party_reattach(party_data &p)
+{
+	bool any = false;
+	for (auto &entry : g_pop_parties) {
+		PopPartyGroup &g = entry.second;
+		if (g.party_id != p.party.party_id)
+			continue;
+		for (PopPartyMember &member : g.members) {
+			map_session_data *sd = pop_party_member_sd(g, member);
+			if (sd == nullptr || member.out)
+				continue;
+			if (party_companion_add(p, *sd, false))
+				any = true;
+			else { // the char-server's members filled the party: they come first
+				member.out = true;
+				sd->status.party_id = pop_party_fake_id(g.id);
+			}
+		}
+	}
+	return any;
+}
+
+/// Ends the joins whose player is gone: offline, off the camp's map, or out of the party they joined. Each way
+/// out has its hook; this heals a path one missed, as pop_companions_maintain does for companions.
+static void population_party_check_joins()
+{
+	for (auto &entry : g_pop_parties) {
+		PopPartyGroup &g = entry.second;
+		if (g.party_id == 0)
+			continue;
+		const map_session_data *player = map_charid2sd(static_cast<int32>(g.player_char_id));
+		if (player == nullptr || player->m != g.m || player->status.party_id != g.party_id || party_search(g.party_id) == nullptr)
+			population_party_unjoin(g);
+	}
+}
+
 // ---- death -----------------------------------------------------------------------------------------------
 
 /// How long a member that just died stays down (ms), 0 for a shell in no party. One killed in sight of a member
@@ -738,7 +927,7 @@ static bool population_party_respawn(map_session_data &sd)
 	sd.ud.canmove_tick = 0;
 	sd.ud.canact_tick = 0;
 	pop_party_warp(&sd, me.spot_x, me.spot_y);
-	sd.status.party_id = pop_party_fake_id(g->id);
+	pop_party_take_party_id(sd, *g, me);
 	pe.sticky_target_id = 0;
 	pe.last_cast_skill_id = 0;
 	pe.last_damage_received = 0;
@@ -780,9 +969,19 @@ void population_party_report(int fd, int16_t map_id)
 			if (pop_party_member_sd(g, member) != nullptr)
 				on_map++;
 		const map_session_data *leader = g.members.empty() ? nullptr : pop_party_member_sd(g, g.members.front());
-		safesnprintf(msg, sizeof(msg), "party %u %s camp %d,%d members %zu/%zu room '%s' leader %d", g.id, g.tpl->name.c_str(),
-			g.camp_x, g.camp_y, on_map, g.members.size(), g.title.c_str(), leader != nullptr ? leader->id : 0);
+		safesnprintf(msg, sizeof(msg), "party %u %s camp %d,%d members %zu/%zu room '%s' leader %d joined %u party_id %d", g.id,
+			g.tpl->name.c_str(), g.camp_x, g.camp_y, on_map, g.members.size(), g.title.c_str(), leader != nullptr ? leader->id : 0,
+			g.player_char_id, g.party_id);
 		clif_displaymessage(fd, msg);
+		if (const map_session_data *player = pop_party_player(g)) {
+			safesnprintf(msg, sizeof(msg), "player %u name %s lv %d at %d,%d camp_dist %d hp %d sp %d dead %d bless %d agi %d",
+				g.id, player->status.name, player->status.base_level, player->x, player->y,
+				distance_xy(player->x, player->y, g.camp_x, g.camp_y),
+				pop_party_pct(player->battle_status.hp, player->battle_status.max_hp),
+				pop_party_pct(player->battle_status.sp, player->battle_status.max_sp), pc_isdead(player) ? 1 : 0,
+				player->sc.getSCE(SC_BLESSING) != nullptr ? 1 : 0, player->sc.getSCE(SC_INCREASEAGI) != nullptr ? 1 : 0);
+			clif_displaymessage(fd, msg);
+		}
 		for (const PopPartyMember &member : g.members) {
 			const map_session_data *sd = pop_party_member_sd(g, member);
 			if (sd == nullptr) {
@@ -796,7 +995,7 @@ void population_party_report(int fd, int16_t map_id)
 				: pe.target_id != 0 ? "fight" : "camp";
 			safesnprintf(msg, sizeof(msg),
 				"member %u %s job %s lv %d name %s at %d,%d spot %d,%d camp_dist %d state %s hp %d sp %d sit %d room %d "
-				"bless %d agi %d songs %d trips %u raised %u helps %u idle %d skills %zu/%zu set %s",
+				"bless %d agi %d songs %d trips %u raised %u helps %u idle %d skills %zu/%zu set %s in_party %d",
 				g.id, population_party_duty_name(member.duty), job_name(sd->status.class_), sd->status.base_level, sd->status.name,
 				sd->x, sd->y, member.spot_x, member.spot_y, distance_xy(sd->x, sd->y, g.camp_x, g.camp_y), state,
 				pop_party_pct(sd->battle_status.hp, sd->battle_status.max_hp), pop_party_pct(sd->battle_status.sp, sd->battle_status.max_sp),
@@ -805,7 +1004,7 @@ void population_party_report(int fd, int16_t map_id)
 				pop_party_song_count(sd), pe.party_trips, pe.party_revived, pe.party_helps,
 				pe.party_idle_since != 0 ? static_cast<int>(DIFF_TICK(gettick(), pe.party_idle_since) / 1000) : -1,
 				pe.attack_skills.size(), pe.buff_skills.size(),
-				pe.party_skill_set.empty() ? "-" : pe.party_skill_set.c_str());
+				pe.party_skill_set.empty() ? "-" : pe.party_skill_set.c_str(), pop_party_in_real_party(g, *sd) ? 1 : 0);
 			clif_displaymessage(fd, msg);
 		}
 	}

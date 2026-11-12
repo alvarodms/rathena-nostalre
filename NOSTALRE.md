@@ -144,9 +144,16 @@ files we do not use. Our changes carry a `nostalRE` comment:
   too low for a class the slot gets the class below, and a performer, a battery
   or a support who would be a Novice is left out. A party is its own party id on
   its members (in the fake range, so party skills and songs reach the party
-  alone); it is not a real party and players cannot join one yet (a player who
-  enters the leader's chat room is told it is full; a member invited to a
-  player's party says it is in one). Members tick on any map a player is on,
+  alone); it is not a real party. A player in no party joins one by entering
+  the leader's chat room or whispering "party" to a member: a party is made for
+  them (Even Share, the player leads), the members take companion slots in it
+  and keep their duties, and the leader closes the room. The player sees their
+  HP, shares EXP (members' levels count for `party_share_level`; their shares
+  are lost) and gets the camp's heals, buffs, songs and Resurrection; the camp
+  defends them too. Leaving the map, logging out or leaving the party ends it,
+  and the members go back to the party's own id; an expelled member stays out
+  until then. A player already in a party is told to leave it first; a member
+  invited to a player's party says it is in one. Members tick on any map a player is on,
   seen or not, or the roamers would never come back; they do not take portals.
   A member killed in sight of a healer with Resurrection waits a minute for it;
   any other gets up on its cell at the camp after the party's `Respawn`, the
