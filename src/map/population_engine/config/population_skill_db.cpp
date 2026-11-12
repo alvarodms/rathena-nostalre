@@ -57,6 +57,7 @@ static const std::unordered_map<std::string, PopSkillCondition> s_cond_name_map 
 	{ "enemy_is_player",      PopSkillCondition::EnemyIsPlayer      }, // nostalRE
 	{ "ally_dead",            PopSkillCondition::AllyDead           }, // nostalRE
 	{ "ally_sp_below",        PopSkillCondition::AllySpBelow        }, // nostalRE
+	{ "ally_sp_low",          PopSkillCondition::AllySpLow          }, // nostalRE
 };
 
 // ---------------------------------------------------------------------------

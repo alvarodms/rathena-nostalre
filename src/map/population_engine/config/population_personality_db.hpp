@@ -32,6 +32,9 @@ struct PopTemperament {
 	int32_t precision_min = 100, precision_max = 100; ///< % of choices that are its best one
 	int32_t pause_every_min = 0, pause_every_max = 0; ///< s between idle pauses (0: none)
 	int32_t pause_for_min = 0, pause_for_max = 0;     ///< s each pause lasts
+	int32_t skill_gap_min = 200, skill_gap_max = 500; ///< ms after a skill before it picks the next
+	uint8_t kill_steal = 0;                       ///< % of others' monsters it takes anyway
+	uint8_t leash = 0;                            ///< a party roamer hunts within this % of the map (0: all of it)
 	PopKindPrefs prefers{};
 };
 

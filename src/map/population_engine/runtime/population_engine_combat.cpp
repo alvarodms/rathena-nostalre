@@ -11,6 +11,7 @@
 #include "../core/population_engine_core.hpp"
 #include "population_shell_runtime.hpp"
 #include "population_party.hpp" // nostalRE
+#include "../core/population_manners.hpp" // nostalRE
 
 #include <algorithm>
 #include <cmath>
@@ -258,6 +259,7 @@ struct PopAllySearchCtx {
 	bool              want_has_status; ///< true=find ally WITH status, false=WITHOUT
 	int               best_hp_pct;     ///< Tracks lowest HP% seen (100=no winner yet)
 	map_session_data *result;          ///< Best ally found (nullptr if none)
+	bool              sp_any = false;  ///< nostalRE: AllySpLow: low SP is enough, whatever the shell's own
 };
 
 /// Scan callback: finds the living ally with the lowest HP% below hp_threshold.
@@ -411,7 +413,7 @@ static int32 pop_ally_sp_scan_cb(block_list *bl, va_list ap)
 	if (!ally->state.active || ally->state.warping) return 0;
 	if (status_isdead(*ally)) return 0;
 	if (ally->battle_status.max_sp == 0) return 0;
-	if (ally->battle_status.sp >= ctx->shell->battle_status.sp / 2) return 0;
+	if (!ctx->sp_any && ally->battle_status.sp >= ctx->shell->battle_status.sp / 2) return 0;
 	const int pct = static_cast<int>(static_cast<uint64>(ally->battle_status.sp) * 100 / ally->battle_status.max_sp);
 	if (pct < ctx->hp_threshold && pct < ctx->best_hp_pct) {
 		ctx->best_hp_pct = pct;
@@ -486,6 +488,8 @@ static map_session_data* population_shell_find_ally_target(
 		map_foreachinrange(pop_ally_dead_scan_cb, sd, scan_range, BL_PC, &ctx);
 		break;
 	case C::AllySpBelow: // nostalRE
+	case C::AllySpLow:
+		ctx.sp_any = cond == C::AllySpLow;
 		map_foreachinrange(pop_ally_sp_scan_cb, sd, scan_range, BL_PC, &ctx);
 		break;
 	case C::AllyStatus:
@@ -620,12 +624,14 @@ bool population_shell_skill_condition_ok(
 		return ctx.result != nullptr;
 	}
 	case C::AllyDead:      // nostalRE
-	case C::AllySpBelow: { // nostalRE
+	case C::AllySpBelow:   // nostalRE
+	case C::AllySpLow: {   // nostalRE
 		PopAllySearchCtx ctx{};
 		ctx.shell        = sd;
 		ctx.hp_threshold = cond_value_num;
 		ctx.best_hp_pct  = 101;
 		ctx.result       = nullptr;
+		ctx.sp_any       = cond == C::AllySpLow;
 		map_foreachinrange(cond == C::AllyDead ? pop_ally_dead_scan_cb : pop_ally_sp_scan_cb, sd, 9, BL_PC, &ctx);
 		return ctx.result != nullptr;
 	}
@@ -1059,6 +1065,9 @@ static double pop_skill_score(map_session_data *sd, const PopulationShellCombatS
 	// A finisher whose combo is primed (target frozen, the skill before it cast).
 	if (sk.condition == static_cast<uint8_t>(PopSkillCondition::EnemyStatus) || sk.condition == static_cast<uint8_t>(PopSkillCondition::AfterSkill))
 		score *= 2.0;
+	// the same skill again and again is a macro, not a player
+	if (sk.skill_id == sd->pop.repeat_skill_id)
+		score *= pop_manners::repeat_factor(sd->pop.repeat_count);
 	return std::max(0.0, score);
 }
 
@@ -1159,6 +1168,8 @@ static void population_shell_scored_attack(map_session_data *sd, uint32 tid, t_t
 			if (population_shell_try_attack(sd, tid, skill_id, skill_lv)) {
 				pop_start_skill_cooldown(sd, skill_id, now);
 				pe.acts_skill++;
+				pe.repeat_count = pe.repeat_skill_id == skill_id ? static_cast<uint8>(std::min(pe.repeat_count + 1, 9)) : 1;
+				pe.repeat_skill_id = skill_id;
 			}
 			return;
 		}
@@ -1166,6 +1177,8 @@ static void population_shell_scored_attack(map_session_data *sd, uint32 tid, t_t
 			return;
 		// A basic attack won, or nothing else can be done now: a few swings before the next choice.
 		pe.melee_chosen = true;
+		pe.repeat_skill_id = 0;
+		pe.repeat_count = 0;
 		if (population_shell_try_attack(sd, tid, 0, 0)) {
 			pe.acts_melee++;
 			const t_tick swing = std::max<t_tick>(status_get_adelay(sd), 300);
@@ -1465,6 +1478,36 @@ static bool population_shell_cast_ally_attack_skill(map_session_data *sd, t_tick
 	return false;
 }
 
+
+/// A shell on its own that ran low on SP, with nothing after it and its fight over, sits down until it has
+/// most of it back; a hit gets it up. True while it sits.
+static bool pop_shell_rest_tick(map_session_data *sd, t_tick now)
+{
+	static constexpr int REST_BELOW_PCT = 25;
+	s_population &pe = sd->pop;
+	const uint32 max_sp = sd->battle_status.max_sp;
+	if (max_sp == 0 || pe.party_group != 0 || pe.companion_owner != 0 || pc_isdead(sd))
+		return false;
+	const int sp_pct = static_cast<int>(static_cast<uint64>(sd->battle_status.sp) * 100 / max_sp);
+	const bool hit = pe.last_attacked_tick != 0 && DIFF_TICK(now, pe.last_attacked_tick) < 3000;
+	if (pe.rest_to_sp != 0) {
+		if (sp_pct < pe.rest_to_sp && !hit)
+			return true;
+		pe.rest_to_sp = 0;
+		if (pc_issit(sd) && pc_setstand(sd, false))
+			clif_standing(*sd);
+		return false;
+	}
+	if (sp_pct >= REST_BELOW_PCT || hit || pe.target_id != 0 || DIFF_TICK(now, pe.last_attack) < 2000)
+		return false;
+	pe.rest_to_sp = static_cast<uint8_t>(rnd_value(60, 95));
+	unit_stop_walking(sd, USW_NONE);
+	if (!pc_issit(sd)) {
+		pc_setsit(sd);
+		clif_sitting(*sd);
+	}
+	return true;
+}
 
 static void population_shell_combat_process_tick(map_session_data *sd, t_tick current_tick, bool do_skills)
 {
@@ -2615,6 +2658,12 @@ int population_engine_combat_per_tick(map_session_data *sd, bool do_skills)
 	if (pe.party_group != 0 && population_party_member_tick(sd, current_tick, do_skills)) {
 		if (DIFF_TICK(gettick(), pe.last_move) > 3000)
 			sd->ud.canmove_tick = gettick();
+		population_shell_status_checkmapchange(sd);
+		return 0;
+	}
+
+	// nostalRE: low on SP with nothing after it, it sits until most of it is back, as a player does
+	if (pop_shell_rest_tick(sd, current_tick)) {
 		population_shell_status_checkmapchange(sd);
 		return 0;
 	}

@@ -186,6 +186,7 @@ struct s_population {
 	uint32 companion_owner = 0;     ///< Shell: char id of the player whose party it joined (0 = plain shell).
 	int32  companion_pending = 0;   ///< Player: id of the shell waiting for this player's new party (0 = none).
 	uint32 party_join_pending = 0;  ///< Player: id of the shell party waiting for this player's new party (0 = none).
+	bool   party_join_fallback = false; ///< Player: the party named for the camp's leader was taken; theirs is tried.
 	t_tick companion_next_scan = 0; ///< Shell: when to look for mobs around the owner again.
 	int16  companion_spot_x = -1;   ///< Shell: the cell it stands on next to its idle owner (-1 = none picked).
 	int16  companion_spot_y = -1;
@@ -230,6 +231,9 @@ struct s_population {
 	t_tick   pause_from = 0;            ///< when the idle pause began (a hit after it ends the pause)
 	t_tick   next_pause_at = 0;         ///< when the next idle pause starts (0: none planned)
 	t_tick   panic_roll_until = 0;      ///< a missed dodge stays missed until then
+	uint8_t  rest_to_sp = 0;            ///< sitting to get its SP back up to this % (0: not resting)
+	uint16_t repeat_skill_id = 0;       ///< the skill it cast last on an enemy (0: a basic attack)
+	uint8_t  repeat_count = 0;          ///< ... and how many times in a row
 	uint32_t acts_skill = 0;            ///< skills it cast on enemies (@populate levels)
 	uint32_t acts_melee = 0;            ///< basic attacks it chose
 	uint32_t pauses = 0;                ///< idle pauses it took (@populate levels)

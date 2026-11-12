@@ -1501,12 +1501,17 @@ int32 status_damage(block_list *src,block_list *target,int64 dhp, int64 dsp, int
 	nullpo_ret(target);
 
 	// Population shells are immortal by default; only shells with PSF::Mortal (Flags: mortal) take damage.
+	// nostalRE: their SP goes down all the same, or their skills would cost nothing
 	if (target->type == BL_PC) {
 		map_session_data *pop_sd = BL_CAST(BL_PC, target);
 		if (pop_sd != nullptr && population_engine_is_population_pc(pop_sd->id)
 		    && !population_engine_shell_is_mortal(pop_sd)
-		    && (hp > 0 || sp > 0 || ap > 0))
-			return 0;
+		    && (hp > 0 || ap > 0)) {
+			if (sp <= 0)
+				return 0;
+			hp = 0;
+			ap = 0;
+		}
 	}
 
 	if(sp && !(target->type&BL_CONSUME))

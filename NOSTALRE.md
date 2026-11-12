@@ -108,8 +108,10 @@ files we do not use. Our changes carry a `nostalRE` comment:
   whose unnamed entry per job stays the default), a gear set from
   `db/population_gear_sets.yml`, stat ranges, names and chat. A temperament is how
   they play, whatever their class: reaction time when a fight starts, precision
-  (the share of choices that are its best, and of dodges it makes) and idle
-  pauses after a kill.
+  (the share of choices that are its best, and of dodges it makes), idle
+  pauses after a kill, the pause before its next skill (`SkillGapMs`, no less
+  than its attack motion), the share of others' monsters it takes anyway
+  (`KillSteal`) and how far a camp roamer strays (`Leash`, a share of the map).
   Both weigh the kinds of skill they prefer. A job with no build keeps its
   `population_engine.yml` entry and still gets a temperament. Builds so far:
   Priest (support, battle), Wizard (area, bolts), Knight (two-handed, spear),
@@ -121,17 +123,25 @@ files we do not use. Our changes carry a `nostalRE` comment:
   element against the target, cast time and delay, SP, the monsters an area skill
   would hit, a primed combo finisher, and its personality's `Prefers`. Skill
   entries may say what they are for with `Kind:`. The conditions still decide
-  what can be cast. A caster waits out its delay instead of meleeing. Off: the
-  old rotation, with `population_engine_shell_basic_attack_chance`.
+  what can be cast. A caster waits out its delay instead of meleeing. A skill cast
+  again and again weighs less each time. Off: the old rotation, with
+  `population_engine_shell_basic_attack_chance`.
+- Shells play beside players as players do (`core/population_manners.hpp`, unit
+  tested in `src/test`, run by ctest). They pay SP for their skills (no permanent
+  `state.autocast`; an immortal shell loses SP, not HP) and, alone and low on SP
+  with nothing to fight, sit until most of it is back. They leave alone a monster
+  someone else fights: one after another player or shell, one a nearby player hit,
+  or one another shell went for first; one after them or their party they fight.
 - Shell parties (`db/population_party.yml`, `population_engine_parties`, on): on
   the maps the file lists (Veins Field 03, Geffen Field 06, Sograt Desert 17)
   some shells play as a party. A party is a tactic and its slots, each slot a
   duty; the one tactic so far is `camp`: the leader (`anchor`) stands on a camp
   spot, half of them with a recruiting chat room; a `support` by them heals,
   buffs and raises the party's members and nobody else; `roamer`s hunt within
-  `Roam` cells of the camp and walk back when they are hurt, out of SP, out of
-  Blessing and Increase Agility or out long enough, wait there to be topped up
-  and leave again; a `performer` Bard with a Dancer on the next cell keeps songs
+  `Roam` cells of the camp (`map`: anywhere) and walk back when they are hurt, out
+  of SP, out of Blessing and Increase Agility or out long enough, wait there to be
+  topped up (low on SP they sit, unless a Professor is there, and the priest casts
+  Magnificat) and leave again; a `performer` Bard with a Dancer on the next cell keeps songs
   and ensembles up; a `battery` Professor gives SP with Soul Exchange and turns
   its own HP into SP, which the support heals back. Members at the camp fight
   only what attacks the camp, and those with nothing to cast sit down.
@@ -144,9 +154,12 @@ files we do not use. Our changes carry a `nostalRE` comment:
   too low for a class the slot gets the class below, and a performer, a battery
   or a support who would be a Novice is left out. A party is its own party id on
   its members (in the fake range, so party skills and songs reach the party
-  alone); it is not a real party. A player in no party joins one by entering
-  the leader's chat room or whispering "party" to a member: a party is made for
-  them (Even Share, the player leads), the members take companion slots in it
+  alone: `party_foreachsamemap` takes its members); it is not a real party. A
+  player in no party asks to join by entering the leader's chat room or whispering
+  "party" to a member; the answer comes a few seconds later, as a player types,
+  with a party invite named for the leader ("Ragnar Party"). Taking it makes the
+  party (Even Share, the player leads; their own name when the leader's is taken),
+  the members take companion slots in it
   and keep their duties, and the leader closes the room. The player sees their
   HP, shares EXP (members' levels count for `party_share_level`; their shares
   are lost) and gets the camp's heals, buffs, songs and Resurrection; the camp
@@ -158,7 +171,7 @@ files we do not use. Our changes carry a `nostalRE` comment:
   A member killed in sight of a healer with Resurrection waits a minute for it;
   any other gets up on its cell at the camp after the party's `Respawn`, the
   same shell (a plain shell's respawn makes a new one). Two skill conditions for
-  it, `ally_dead` and `ally_sp_below`, and four skill sets (`priest_camp`,
+  it, `ally_dead`, `ally_sp_below` and `ally_sp_low`, and four skill sets (`priest_camp`,
   `professor_battery`, `bard_camp`, `dancer_camp`). `@populate parties` lists the
   map's parties and what each member is doing. Files:
   `config/population_party_db.cpp`, `runtime/population_party.cpp`, and the

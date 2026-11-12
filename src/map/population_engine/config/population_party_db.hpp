@@ -38,7 +38,7 @@ struct PopPartySlot {
 	int32_t count_min = 1, count_max = 1;
 	int32_t chance = 100;           ///< % of parties that have the slot
 	// roamer
-	int32_t roam = 40;              ///< cells from the camp it hunts within
+	int32_t roam = 40;              ///< cells from the camp it hunts within (0: the whole map)
 	int32_t return_hp = 40;         ///< heads back below this % HP
 	int32_t return_sp = 15;         ///< or this % SP
 	bool return_unbuffed = true;    ///< or when the buffs it left with have run out

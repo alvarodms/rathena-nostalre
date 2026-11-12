@@ -6,6 +6,7 @@
 #include "population_party_db.hpp"
 
 #include <algorithm>
+#include <cctype>
 
 #include <common/showmsg.hpp>
 
@@ -160,8 +161,19 @@ bool PopulationPartyDatabase::readSlot(const ryml::NodeRef& node, const std::str
 		slot.chance = std::clamp(chance, 0, 100);
 
 	int32_t v = 0;
-	if (this->nodeExists(node, "Roam") && this->asInt32(node, "Roam", v))
-		slot.roam = std::clamp(v, 8, 200);
+	if (this->nodeExists(node, "Roam")) {
+		const ryml::NodeRef& r = node[c4::to_csubstr("Roam")];
+		std::string word;
+		if (r.has_val())
+			word.assign(r.val().str, r.val().len);
+		std::transform(word.begin(), word.end(), word.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+		if (word == "map")
+			slot.roam = 0; // the whole map
+		else if (pop_node_int(r, v))
+			slot.roam = std::clamp(v, 8, 1000);
+		else
+			this->invalidWarning(r, "Roam needs a number of cells, or map.\n");
+	}
 	if (this->nodeExists(node, "Return")) {
 		const ryml::NodeRef& r = node[c4::to_csubstr("Return")];
 		if (this->nodeExists(r, "HpBelow") && this->asInt32(r, "HpBelow", v))

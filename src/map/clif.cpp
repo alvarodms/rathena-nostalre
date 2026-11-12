@@ -7935,11 +7935,17 @@ void clif_party_invite( const map_session_data& sd, const map_session_data& tsd 
 		return;
 	}
 
+	clif_party_invite_as( tsd, party->party.party_id, party->party.name );
+}
+
+/// nostalRE: an invite to `party_id` named `name`, which needs no party behind it: a shell party's (party_reply_invite
+/// hands the answer to population_engine_party_invite_reply).
+void clif_party_invite_as( const map_session_data& tsd, int32 party_id, const char* name ){
 	PACKET_ZC_PARTY_JOIN_REQ p = {};
 
 	p.PacketType = HEADER_ZC_PARTY_JOIN_REQ;
-	p.GRID = party->party.party_id;
-	safestrncpy( p.groupName, party->party.name, sizeof( p.groupName ) );
+	p.GRID = party_id;
+	safestrncpy( p.groupName, name, sizeof( p.groupName ) );
 
 	clif_send( &p, sizeof( p ), &tsd, SELF );
 }

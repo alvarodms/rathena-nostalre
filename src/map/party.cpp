@@ -179,8 +179,8 @@ void party_created(uint32 account_id,uint32 char_id,int32 fail,int32 party_id,ch
 
 	sd->party_creating = false;
 
-	if( fail )
-		population_engine_companion_party_failed( *sd ); // nostalRE
+	if( fail && population_engine_companion_party_failed( *sd ) )
+		return; // nostalRE: asked again under another name
 
 	if( !fail ) {
 		sd->status.party_id = party_id;
@@ -600,6 +600,10 @@ bool party_booking_load( uint32 account_id, uint32 char_id, struct s_party_booki
 }
 
 bool party_reply_invite( map_session_data& sd, int32 party_id, int32 flag ){
+	// nostalRE: a shell party's invite; it has no party until the player takes it
+	if( population_engine_party_invite_reply( sd, party_id, flag ) )
+		return flag == 1;
+
 	// forged
 	if( sd.party_invite != party_id ) {
 		sd.party_invite = 0;
@@ -1505,7 +1509,12 @@ int32 party_foreachsamemap(int32 (*func)(block_list*,va_list),const map_session_
 
 	nullpo_ret(sd);
 
-	if((p = party_search(sd->status.party_id)) == nullptr)
+	// nostalRE: a shell party's member has a party id of its own and no party behind it: its party's members
+	map_session_data *members[MAX_PARTY] = {};
+	if((p = party_search(sd->status.party_id)) != nullptr) {
+		for(i = 0; i < MAX_PARTY; i++)
+			members[i] = p->data[i].sd;
+	} else if(population_engine_shell_party_members(*sd, members, MAX_PARTY) == 0)
 		return 0;
 
 	x0 = sd->x-range;
@@ -1514,7 +1523,7 @@ int32 party_foreachsamemap(int32 (*func)(block_list*,va_list),const map_session_
 	y1 = sd->y+range;
 
 	for(i = 0; i < MAX_PARTY; i++) {
-		map_session_data *psd = p->data[i].sd;
+		map_session_data *psd = members[i];
 
 		if(!psd)
 			continue;

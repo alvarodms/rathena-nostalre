@@ -96,7 +96,13 @@ void population_engine_companions_of_party_leave(int party_id);
 void population_engine_companions_reattach(struct party_data &p);
 /// The party made for a whispered request, or for joining a shell party, exists / could not be made.
 void population_engine_companion_party_ready(map_session_data &owner);
-void population_engine_companion_party_failed(map_session_data &owner);
+/// True when it asks the char-server again under another name (the caller shows no failure).
+bool population_engine_companion_party_failed(map_session_data &owner);
+/// A shell party's members on the map (`sd` among them) into `out`, when `sd` is one with its party's own id
+/// (party_foreachsamemap reaches them so). Returns how many: 0 for anyone else.
+int32_t population_engine_shell_party_members(const map_session_data &sd, map_session_data *out[], int32_t max);
+/// The player answered a party invite. True when it was a shell party's (party_reply_invite does no more).
+bool population_engine_party_invite_reply(map_session_data &player, int32_t party_id, int32_t flag);
 /// Whether `sd` is a party companion. `sd` may be nullptr.
 bool population_engine_is_companion(const map_session_data *sd);
 /// Whether `sd` is a shell in a player's real party: a companion, or a member of a shell party the player joined.
