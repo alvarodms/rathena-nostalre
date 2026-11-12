@@ -19,7 +19,9 @@
 # Population Engine Database — Vendor population
 ###########################################################################
 #
-# Job entries for shells that act as overhead-message vendors.  Picked up by
+# Job entries for shells that act as overhead-message vendors. VendorKey: names one
+# shop in db/population_vendors.yml; nostalRE's VendorKeys: {key: weight, ...} lists
+# several, and the merchant opens one by weight among the kinds the app allows.  Picked up by
 # the VendorPlacement-driven autosummon pass for maps that have entries in
 # db/population_vendors.yml (which configures the vendor inventory).
 #
@@ -49,7 +51,11 @@ Body:
     Flags:
       - mortal
     TownBehavior: vendor
-    VendorKey: "field_drops"
+    # nostalRE: the shops a Merchant opens, by weight, among the kinds switched on
+    VendorKeys:
+      field_drops: 4
+      potions: 1
+      ammo_shop: 1
     Script: |
       setcart;
 
@@ -64,6 +70,26 @@ Body:
     Flags:
       - mortal
     TownBehavior: vendor
-    VendorKey: "dungeon_drops"
+    VendorKeys:                     # nostalRE: a smith sells dungeon finds or forged gear
+      dungeon_drops: 3
+      equip_shop: 1
+    Script: |
+      setcart;
+
+  # nostalRE: Alchemists brew what they sell
+  - Profile: vendor_alchemist
+    Jobs:
+      Alchemist: para_merchant
+      Creator  : para_merchant
+    NameProfile: default
+    Hair: [0, 42]
+    HairColor: [0, 131]
+    ClothesColor: [0, 699]
+    Flags:
+      - mortal
+    TownBehavior: vendor
+    VendorKeys:
+      potions: 1
+      buff_shop: 1
     Script: |
       setcart;

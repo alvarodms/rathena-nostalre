@@ -19,8 +19,15 @@
 { "population_engine_demand_grace_ms",&battle_config.population_engine_demand_grace_ms,300000,0,INT_MAX,}, // nostalRE
 { "population_engine_density_pct",&battle_config.population_engine_density_pct,100,10,300,}, // nostalRE
 { "population_engine_companion_max",&battle_config.population_engine_companion_max,3,0,MAX_PARTY - 1,}, // nostalRE
+{ "population_engine_vendor_pct",&battle_config.population_engine_vendor_pct,100,10,1000,}, // nostalRE
+{ "population_engine_vendor_price_pct",&battle_config.population_engine_vendor_price_pct,100,10,1000,}, // nostalRE
+{ "population_engine_vendor_towns",&battle_config.population_engine_vendor_towns,1,0,2,}, // nostalRE
+{ "population_engine_vendor_loot",&battle_config.population_engine_vendor_loot,1,0,1,}, // nostalRE
+{ "population_engine_vendor_supplies",&battle_config.population_engine_vendor_supplies,1,0,1,}, // nostalRE
+{ "population_engine_vendor_gear",&battle_config.population_engine_vendor_gear,1,0,1,}, // nostalRE
+{ "population_engine_vendor_cards",&battle_config.population_engine_vendor_cards,0,0,1,}, // nostalRE
 { "population_engine_vendor_shift_min_ms",&battle_config.population_engine_vendor_shift_min_ms,900000,0,INT_MAX,}, // nostalRE
-{ "population_engine_vendor_shift_max_ms",&battle_config.population_engine_vendor_shift_max_ms,2400000,0,INT_MAX,}, // nostalRE
+{ "population_engine_vendor_shift_max_ms",&battle_config.population_engine_vendor_shift_max_ms,2700000,0,INT_MAX,}, // nostalRE
 { "population_engine_companion_revive_ms",&battle_config.population_engine_companion_revive_ms,60000,1000,INT_MAX,}, // nostalRE
 { "population_engine_max_count",&battle_config.population_engine_max_count,1000,1,30000,},
 { "population_engine_equipment_strict_load",&battle_config.population_engine_equipment_strict_load,0,0,1,},

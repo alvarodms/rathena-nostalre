@@ -26,6 +26,15 @@
 #   dynamic — derive the item list from the drop tables of mobs spawned on the
 #             same map at load time.  Stock: is ignored when Type is dynamic.
 #
+# Goods: loot | supplies | gear   (nostalRE; default loot for dynamic, supplies for static)
+#   What the shop sells, for the app's settings: each kind has its own switch
+#   (population_engine_vendor_loot / _supplies / _gear). A merchant only opens
+#   shops of the kinds switched on.
+#
+# CardPrice: N   (nostalRE; default 300000)
+#   One card's price in a dynamic shop that sells cards, before
+#   population_engine_vendor_price_pct (a card's sell value is a few zeny).
+#
 # MaxSlots: N   (1–12, default 12)
 #   Maximum number of distinct items in the vend (cap: MC_VENDING lv10 = 12).
 #
@@ -52,6 +61,9 @@
 # ItemFlags:                       (dynamic vendors only)
 #   AllowEquipment: true | false   (default false) — armor/weapons (item.equip != 0)
 #   AllowCards:     true | false   (default false) — IT_CARD
+#   CardsBySetting: true | false   (default false) — nostalRE: cards when
+#                   population_engine_vendor_cards is on. Up to 2 per shop, one
+#                   each, at CardPrice; never an MVP's card.
 #   AllowEtc:       true | false   (default true)  — IT_ETC (mats, junk loot)
 #   AllowUsable:    true | false   (default true)  — IT_HEALING / IT_USABLE / IT_DELAYCONSUME
 #
@@ -72,6 +84,8 @@
 #   entry of their own (- VendorPlacement: [...], no VendorKey) at the end.
 #   When ANY placement exists, vendor shells only stand on the listed maps.
 #     Map:        Map name (required, e.g. prontera).
+#     Tier:       capital | main | minor (default main). population_engine_vendor_towns
+#                 0 gives shops to capital towns, 1 also main, 2 also minor.
 #     MinSpacing: Minimum cells between two vendor shells (0 = off).
 #     MaxVendors: How many shops the map holds (0 = 12).
 #     Area:       Optional bounding box {X1, Y1, X2, Y2}. Y in map coords
@@ -79,8 +93,8 @@
 #                 Omit Area: to allow the whole map (less a border).
 #   A map named twice keeps the last one (warning logged).
 #
-# How many shops a town gets: MaxVendors, times the "How busy" setting
-# (population_engine_density_pct), and only while a player is on the map (demand
+# How many shops a town gets: MaxVendors, times the "Shops per town" setting
+# (population_engine_vendor_pct), and only while a player is on the map (demand
 # spawn). Vendors count toward "Max AI players" (population_engine_max_count) like
 # any shell. Each stands on a random walkable cell of its Area, 3+ cells from any
 # NPC or warp and off novending cells, and keeps it for a random shift
@@ -99,6 +113,7 @@ Body:
   - VendorKey: "potions"
     Title: "[Potions]"
     Type: Static
+    Goods: supplies
     Stock:
       - Item: Red_Potion
         Amount: 500
@@ -130,6 +145,7 @@ Body:
   - VendorKey: "buff_shop"
     Title: "[Buff Items]"
     Type: Static
+    Goods: supplies
     Stock:
       - Item: Center_Potion
         Amount: 80
@@ -151,6 +167,7 @@ Body:
   - VendorKey: "ammo_shop"
     Title: "[Ammo & Arrows]"
     Type: Static
+    Goods: supplies
     Stock:
       - Item: Arrow
         Amount: 5000
@@ -182,6 +199,7 @@ Body:
   - VendorKey: "equip_shop"
     Title: "[Equipment]"
     Type: Static
+    Goods: gear
     MaxSlots: 12
     Stock:
       # Equipment is non-stackable — Amount is always capped to 1 per vend slot.
@@ -219,6 +237,7 @@ Body:
   - VendorKey: "field_drops"
     Title: "Field Loots"
     Type: Dynamic
+    Goods: loot
     MaxSlots: 12
     MaxAmount: [1, 30000]          # randomize stack size per item (equipment auto-capped to 1)
     PriceMultiplier: 130
@@ -237,6 +256,8 @@ Body:
   - VendorKey: "dungeon_drops"
     Title: "Dungeon Loots"
     Type: Dynamic
+    Goods: loot
+    CardPrice: 300000               # one card, before population_engine_vendor_price_pct
     MaxSlots: 12
     MaxAmount: [1, 30000]          # randomize stack size per item (equipment auto-capped to 1)
     PriceMultiplier: 160
@@ -244,7 +265,8 @@ Body:
     RandomizePerShell: true
     ItemFlags:
       AllowEquipment: true         # let dungeon vendors stock gear
-      AllowCards: false            # cards stay rare/expensive elsewhere
+      AllowCards: false            # cards stay rare/expensive elsewhere...
+      CardsBySetting: true         # ...unless population_engine_vendor_cards is on: then up to 2, no MVP cards
       AllowEtc: true
       AllowUsable: true
   # ------------------------------------------------------------------
@@ -267,82 +289,161 @@ Body:
   #     AllowCards: false
 
   # ------------------------------------------------------------------
-  # nostalRE: where vendor shells stand, for every VendorKey above. Main towns only;
-  # Prontera holds the most. Each Area is a box around the town's centre (the @go
-  # spot); shells take random walkable cells in it, 3+ cells from any NPC or warp,
-  # and move as their shifts end (population_engine_vendor_shift_*_ms).
-  # Izlude's channels each get their own stalls.
+  # nostalRE: where vendor shells stand, for every VendorKey above. Tier capital
+  # (Prontera, the most shops), main and minor; population_engine_vendor_towns says
+  # down to which tier towns get shops. Each Area is a box around the town's centre
+  # (the @go spot); shells take random walkable cells in it, 3+ cells from any NPC
+  # or warp, and move as their shifts end (population_engine_vendor_shift_*_ms).
+  # Izlude's channels each get their own stalls. Niflheim stays out: a ghost town.
   # ------------------------------------------------------------------
   - VendorPlacement:
       - Map: prontera
+        Tier: capital
         MinSpacing: 2
         MaxVendors: 30
         Area: { X1: 116, Y1: 151, X2: 196, Y2: 231 }
       - Map: geffen
+        Tier: main
         MinSpacing: 2
         MaxVendors: 12
         Area: { X1: 94, Y1: 34, X2: 144, Y2: 84 }
       - Map: payon
+        Tier: main
         MinSpacing: 2
         MaxVendors: 12
         Area: { X1: 137, Y1: 208, X2: 187, Y2: 258 }
       - Map: morocc
+        Tier: main
         MinSpacing: 2
         MaxVendors: 12
         Area: { X1: 131, Y1: 68, X2: 181, Y2: 118 }
       - Map: aldebaran
+        Tier: main
         MinSpacing: 2
         MaxVendors: 12
         Area: { X1: 115, Y1: 106, X2: 165, Y2: 156 }
       - Map: yuno
+        Tier: main
         MinSpacing: 2
         MaxVendors: 12
         Area: { X1: 132, Y1: 26, X2: 182, Y2: 76 }
       - Map: lighthalzen
+        Tier: main
         MinSpacing: 2
         MaxVendors: 12
         Area: { X1: 133, Y1: 67, X2: 183, Y2: 117 }
       - Map: rachel
+        Tier: main
         MinSpacing: 2
         MaxVendors: 10
         Area: { X1: 105, Y1: 85, X2: 155, Y2: 135 }
       - Map: einbroch
+        Tier: main
         MinSpacing: 2
         MaxVendors: 10
         Area: { X1: 39, Y1: 175, X2: 89, Y2: 225 }
       - Map: izlude
+        Tier: main
         MinSpacing: 2
         MaxVendors: 6
         Area: { X1: 108, Y1: 126, X2: 148, Y2: 166 }
       - Map: izlude_a
+        Tier: main
         MinSpacing: 2
         MaxVendors: 6
         Area: { X1: 108, Y1: 126, X2: 148, Y2: 166 }
       - Map: izlude_b
+        Tier: main
         MinSpacing: 2
         MaxVendors: 6
         Area: { X1: 108, Y1: 126, X2: 148, Y2: 166 }
       - Map: izlude_c
+        Tier: main
         MinSpacing: 2
         MaxVendors: 6
         Area: { X1: 108, Y1: 126, X2: 148, Y2: 166 }
       - Map: izlude_d
+        Tier: main
         MinSpacing: 2
         MaxVendors: 6
         Area: { X1: 108, Y1: 126, X2: 148, Y2: 166 }
       - Map: alberta
+        Tier: main
         MinSpacing: 2
         MaxVendors: 6
         Area: { X1: 172, Y1: 127, X2: 212, Y2: 167 }
       - Map: comodo
+        Tier: main
         MinSpacing: 2
         MaxVendors: 6
         Area: { X1: 189, Y1: 123, X2: 229, Y2: 163 }
       - Map: hugel
+        Tier: main
         MinSpacing: 2
         MaxVendors: 6
         Area: { X1: 76, Y1: 125, X2: 116, Y2: 165 }
       - Map: veins
+        Tier: main
         MinSpacing: 2
         MaxVendors: 6
         Area: { X1: 196, Y1: 103, X2: 236, Y2: 143 }
+      - Map: amatsu
+        Tier: minor
+        MinSpacing: 2
+        MaxVendors: 4
+        Area: { X1: 183, Y1: 69, X2: 213, Y2: 99 }
+      - Map: louyang
+        Tier: minor
+        MinSpacing: 2
+        MaxVendors: 4
+        Area: { X1: 202, Y1: 25, X2: 232, Y2: 55 }
+      - Map: gonryun
+        Tier: minor
+        MinSpacing: 2
+        MaxVendors: 4
+        Area: { X1: 145, Y1: 105, X2: 175, Y2: 135 }
+      - Map: umbala
+        Tier: minor
+        MinSpacing: 2
+        MaxVendors: 4
+        Area: { X1: 74, Y1: 142, X2: 104, Y2: 172 }
+      - Map: ayothaya
+        Tier: minor
+        MinSpacing: 2
+        MaxVendors: 4
+        Area: { X1: 136, Y1: 102, X2: 166, Y2: 132 }
+      - Map: moscovia
+        Tier: minor
+        MinSpacing: 2
+        MaxVendors: 4
+        Area: { X1: 208, Y1: 169, X2: 238, Y2: 199 }
+      - Map: manuk
+        Tier: minor
+        MinSpacing: 2
+        MaxVendors: 4
+        Area: { X1: 267, Y1: 123, X2: 297, Y2: 153 }
+      - Map: splendide
+        Tier: minor
+        MinSpacing: 2
+        MaxVendors: 4
+        Area: { X1: 186, Y1: 132, X2: 216, Y2: 162 }
+      - Map: brasilis
+        Tier: minor
+        MinSpacing: 2
+        MaxVendors: 4
+        Area: { X1: 167, Y1: 224, X2: 197, Y2: 254 }
+      - Map: dewata
+        Tier: minor
+        MinSpacing: 2
+        MaxVendors: 4
+        Area: { X1: 185, Y1: 165, X2: 215, Y2: 195 }
+      - Map: eclage
+        Tier: minor
+        MinSpacing: 2
+        MaxVendors: 4
+        Area: { X1: 95, Y1: 24, X2: 125, Y2: 54 }
+      - Map: malangdo
+        Tier: minor
+        MinSpacing: 2
+        MaxVendors: 4
+        Area: { X1: 125, Y1: 99, X2: 155, Y2: 129 }
