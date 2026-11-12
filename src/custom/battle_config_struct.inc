@@ -88,6 +88,13 @@ int32 population_engine_demand_spawn; // nostalRE: shells only on maps a player 
 int32 population_engine_demand_grace_ms; // nostalRE: keep a vacated map's shells this long
 int32 population_engine_density_pct; // nostalRE: scales spawn table counts
 int32 population_engine_companion_max; // nostalRE: shells one player can have in their party
+int32 population_engine_vendor_pct; // nostalRE: shops per town, % of each placement's MaxVendors
+int32 population_engine_vendor_price_pct; // nostalRE: shell shop prices, % of what the yml gives
+int32 population_engine_vendor_towns; // nostalRE: towns with shops: 0 capital, 1 + main towns, 2 + minor towns
+int32 population_engine_vendor_loot; // nostalRE: shops selling monster drops
+int32 population_engine_vendor_supplies; // nostalRE: shops selling potions, buff items, ammo
+int32 population_engine_vendor_gear; // nostalRE: shops selling equipment
+int32 population_engine_vendor_cards; // nostalRE: cards in the loot shops marked CardsBySetting
 int32 population_engine_vendor_shift_min_ms; // nostalRE: a vendor shell keeps its stall this long at least
 int32 population_engine_vendor_shift_max_ms; // nostalRE: and this long at most (0 = until its map empties)
 int32 population_engine_companion_revive_ms; // nostalRE: a dead companion nobody revives gets up by its owner after this
