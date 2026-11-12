@@ -94,6 +94,8 @@ class PopulationEngineDatabase : public TypesafeYamlDatabase<uint16_t, Populatio
 	bool m_auto_arena_pool = false;
 
 	ryml::NodeRef warnAnchorForJob(const ryml::NodeRef& node);
+	/// nostalRE: VendorKeys: {key: weight, ...} into `out` (weight 0 drops the key).
+	void parseVendorKeys(const ryml::NodeRef& node, std::vector<std::pair<std::string, uint32_t>>& out);
 	void markInvalidItem(const ryml::NodeRef& node, const char* yaml_key, uint16_t job_id, uint16_t bad_id);
 	bool parseOptionalIntRange(const ryml::NodeRef& node, const std::string& key, int16_t& out_min, int16_t& out_max, uint16_t job_id);
 	void readUInt16FirstKey(const ryml::NodeRef& node, std::initializer_list<const char*> keys, uint16_t& out);
@@ -155,6 +157,8 @@ class PopulationVendorDatabase : public YamlDatabase {
 	/// VendorPlacement: blocks during parseBodyNode. If multiple vendor entries name
 	/// the same Map, the last one parsed wins (a warning is emitted).
 	std::unordered_map<std::string, PopulationVendorPlacement> placements_by_map_;
+
+	void parsePlacements(const ryml::NodeRef& vp_node, const std::string& source);
 
 public:
 	PopulationVendorDatabase();

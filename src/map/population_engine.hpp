@@ -67,6 +67,8 @@ void population_engine_on_shell_kills_player(map_session_data *killer_sd, map_se
 size_t population_engine_get_count();
 /// nostalRE: one chat line for each shell on the map: level, stats and worn gear (@populate levels).
 void population_engine_report_levels(int fd, int16_t map_id);
+/// nostalRE: one chat line for each vendor shell on the map: cell, NPC clearance, shift left (@populate vendors).
+void population_engine_report_vendors(int fd, int16_t map_id);
 /// Stop combat mode for a population shell (teardown hat effect, cleanup, set state=false).
 /// Safe to call even if not in combat. Used by clif quit/restart paths.
 void population_engine_combat_shell_stop(map_session_data *sd);

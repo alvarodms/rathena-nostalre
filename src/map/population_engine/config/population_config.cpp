@@ -398,8 +398,101 @@ const std::string PopulationVendorDatabase::getDefaultLocation()
 	return population_config_db_path_vendors_yaml();
 }
 
+void PopulationEngineDatabase::parseVendorKeys(const ryml::NodeRef& node, std::vector<std::pair<std::string, uint32_t>>& out)
+{
+	const ryml::NodeRef& keys = node[c4::to_csubstr("VendorKeys")];
+	out.clear();
+	if (!keys.is_map()) {
+		this->invalidWarning(keys, "VendorKeys must map each VendorKey to a weight.\n");
+		return;
+	}
+	for (const ryml::NodeRef& kn : keys.children()) {
+		uint32_t weight = 0;
+		if (!ryml::read(kn, &weight)) {
+			this->invalidWarning(kn, "VendorKeys: the weight must be a number.\n");
+			continue;
+		}
+		if (weight > 0)
+			out.emplace_back(std::string(kn.key().str, kn.key().len), weight);
+	}
+}
+
+/// nostalRE: one VendorPlacement: block (a map or a list of maps) into placements_by_map_,
+/// the index the autosummon pass and the cell picker read. A map named twice keeps the last.
+void PopulationVendorDatabase::parsePlacements(const ryml::NodeRef& vp_node, const std::string& source)
+{
+	auto parse_one_vp = [&](const ryml::NodeRef& entry_node) {
+		std::string map_name;
+		if (!this->asString(entry_node, "Map", map_name) || map_name.empty())
+			return;
+		PopulationVendorPlacement p;
+		p.map = map_name;
+		if (this->nodeExists(entry_node, "MinSpacing")) {
+			int32_t s = 0;
+			if (this->asInt32(entry_node, "MinSpacing", s)) p.min_spacing = std::max(0, s);
+		}
+		if (this->nodeExists(entry_node, "MaxVendors")) {
+			int32_t mv = 0;
+			if (this->asInt32(entry_node, "MaxVendors", mv)) p.max_vendors = std::max(0, mv);
+		}
+		if (this->nodeExists(entry_node, "Area")) {
+			const ryml::NodeRef& area = entry_node[c4::to_csubstr("Area")];
+			int16_t x1 = -1, y1 = -1, x2 = -1, y2 = -1;
+			if (this->nodeExists(area, "X1")) this->asInt16(area, "X1", x1);
+			if (this->nodeExists(area, "Y1")) this->asInt16(area, "Y1", y1);
+			if (this->nodeExists(area, "X2")) this->asInt16(area, "X2", x2);
+			if (this->nodeExists(area, "Y2")) this->asInt16(area, "Y2", y2);
+			// Normalize swapped corners (e.g. user supplied Y1=149, Y2=46).
+			if (x1 >= 0 && x2 >= 0 && x1 > x2) std::swap(x1, x2);
+			if (y1 >= 0 && y2 >= 0 && y1 > y2) std::swap(y1, y2);
+			p.area_x1 = x1; p.area_y1 = y1; p.area_x2 = x2; p.area_y2 = y2;
+		}
+		if (this->nodeExists(entry_node, "Tier")) {
+			std::string t;
+			if (this->asString(entry_node, "Tier", t)) {
+				if (t == "capital") p.tier = 0;
+				else if (t == "main") p.tier = 1;
+				else if (t == "minor") p.tier = 2;
+				else
+					this->invalidWarning(entry_node[c4::to_csubstr("Tier")],
+						"VendorPlacement Map '%s': Tier must be 'capital', 'main' or 'minor' (got '%s').\n", map_name.c_str(), t.c_str());
+			}
+		}
+		if (placements_by_map_.find(map_name) != placements_by_map_.end()) {
+			const PopulationVendorPlacement &existing = placements_by_map_[map_name];
+			const bool identical =
+				existing.min_spacing == p.min_spacing &&
+				existing.max_vendors == p.max_vendors &&
+				existing.area_x1 == p.area_x1 && existing.area_y1 == p.area_y1 &&
+				existing.area_x2 == p.area_x2 && existing.area_y2 == p.area_y2;
+			if (!identical) {
+				ShowWarning("%s: VendorPlacement Map '%s' already defined with different settings; "
+				            "the last one wins.\n",
+				            source.c_str(), map_name.c_str());
+			}
+		}
+		placements_by_map_[map_name] = std::move(p);
+	};
+	if (vp_node.is_seq()) {
+		for (const ryml::NodeRef& en : vp_node.children())
+			parse_one_vp(en);
+	} else if (vp_node.is_map()) {
+		parse_one_vp(vp_node);
+	}
+}
+
 uint64 PopulationVendorDatabase::parseBodyNode(const ryml::NodeRef& node)
 {
+	// nostalRE: an entry with only VendorPlacement: lists the maps vendor shells stand on
+	if (!this->nodeExists(node, "VendorKey")) {
+		if (!this->nodeExists(node, "VendorPlacement")) {
+			this->invalidWarning(node, "Missing node \"VendorKey\" or \"VendorPlacement\".\n");
+			return 0;
+		}
+		this->parsePlacements(node[c4::to_csubstr("VendorPlacement")], "placement list");
+		return 1;
+	}
+
 	std::string key;
 	if (!this->asString(node, "VendorKey", key) || key.empty())
 		return 0;
@@ -426,6 +519,24 @@ uint64 PopulationVendorDatabase::parseBodyNode(const ryml::NodeRef& node)
 		int32_t max_slots = 12;
 		if (this->asInt32(node, "MaxSlots", max_slots))
 			entry.max_slots = std::max(1, std::min(12, max_slots));
+	}
+
+	// nostalRE: what it sells, each kind switched in the app's settings
+	if (this->nodeExists(node, "Goods")) {
+		std::string g;
+		if (this->asString(node, "Goods", g)) {
+			if (g == "loot") entry.goods = PopVendorGoods::Loot;
+			else if (g == "supplies") entry.goods = PopVendorGoods::Supplies;
+			else if (g == "gear") entry.goods = PopVendorGoods::Gear;
+			else
+				this->invalidWarning(node[c4::to_csubstr("Goods")],
+					"VendorKey '%s': Goods must be 'loot', 'supplies' or 'gear' (got '%s').\n", key.c_str(), g.c_str());
+		}
+	}
+	if (this->nodeExists(node, "CardPrice")) {
+		uint32_t cp = 0;
+		if (this->asUInt32(node, "CardPrice", cp))
+			entry.card_price = std::max<uint32_t>(1, cp);
 	}
 
 	if (this->nodeExists(node, "PriceMultiplier")) {
@@ -475,6 +586,8 @@ uint64 PopulationVendorDatabase::parseBodyNode(const ryml::NodeRef& node)
 				entry.allow_equipment = b;
 			if (this->nodeExists(flags_node, "AllowCards")     && this->asBool(flags_node, "AllowCards",     b))
 				entry.allow_cards = b;
+			if (this->nodeExists(flags_node, "CardsBySetting") && this->asBool(flags_node, "CardsBySetting", b))
+				entry.cards_by_setting = b; // nostalRE
 			if (this->nodeExists(flags_node, "AllowEtc")       && this->asBool(flags_node, "AllowEtc",       b))
 				entry.allow_etc = b;
 			if (this->nodeExists(flags_node, "AllowUsable")    && this->asBool(flags_node, "AllowUsable",    b))
@@ -576,61 +689,13 @@ uint64 PopulationVendorDatabase::parseBodyNode(const ryml::NodeRef& node)
 		}
 	}
 
-	// VendorPlacement: optional per-vendor placement constraint (Map / MinSpacing /
-	// MaxVendors / Area). Populates the derived placements_by_map_ index used by
-	// the autosummon pass and the cell picker. If multiple vendor entries name the
-	// same Map, the last one parsed wins (a warning is emitted).
-	if (this->nodeExists(node, "VendorPlacement")) {
-		const ryml::NodeRef& vp_node = node[c4::to_csubstr("VendorPlacement")];
-		auto parse_one_vp = [&](const ryml::NodeRef& entry_node) {
-			std::string map_name;
-			if (!this->asString(entry_node, "Map", map_name) || map_name.empty())
-				return;
-			PopulationVendorPlacement p;
-			p.map = map_name;
-			if (this->nodeExists(entry_node, "MinSpacing")) {
-				int32_t s = 0;
-				if (this->asInt32(entry_node, "MinSpacing", s)) p.min_spacing = std::max(0, s);
-			}
-			if (this->nodeExists(entry_node, "MaxVendors")) {
-				int32_t mv = 0;
-				if (this->asInt32(entry_node, "MaxVendors", mv)) p.max_vendors = std::max(0, mv);
-			}
-			if (this->nodeExists(entry_node, "Area")) {
-				const ryml::NodeRef& area = entry_node[c4::to_csubstr("Area")];
-				int16_t x1 = -1, y1 = -1, x2 = -1, y2 = -1;
-				if (this->nodeExists(area, "X1")) this->asInt16(area, "X1", x1);
-				if (this->nodeExists(area, "Y1")) this->asInt16(area, "Y1", y1);
-				if (this->nodeExists(area, "X2")) this->asInt16(area, "X2", x2);
-				if (this->nodeExists(area, "Y2")) this->asInt16(area, "Y2", y2);
-				// Normalize swapped corners (e.g. user supplied Y1=149, Y2=46).
-				if (x1 >= 0 && x2 >= 0 && x1 > x2) std::swap(x1, x2);
-				if (y1 >= 0 && y2 >= 0 && y1 > y2) std::swap(y1, y2);
-				p.area_x1 = x1; p.area_y1 = y1; p.area_x2 = x2; p.area_y2 = y2;
-			}
-			if (placements_by_map_.find(map_name) != placements_by_map_.end()) {
-				const PopulationVendorPlacement &existing = placements_by_map_[map_name];
-				const bool identical =
-					existing.min_spacing == p.min_spacing &&
-					existing.max_vendors == p.max_vendors &&
-					existing.area_x1 == p.area_x1 && existing.area_y1 == p.area_y1 &&
-					existing.area_x2 == p.area_x2 && existing.area_y2 == p.area_y2;
-				if (!identical) {
-					ShowWarning("VendorKey '%s': VendorPlacement Map '%s' already defined by another "
-					            "vendor entry with different settings; overwriting (placements are "
-					            "unioned per map).\n",
-					            key.c_str(), map_name.c_str());
-				}
-			}
-			placements_by_map_[map_name] = std::move(p);
-		};
-		if (vp_node.is_seq()) {
-			for (const ryml::NodeRef& en : vp_node.children())
-				parse_one_vp(en);
-		} else if (vp_node.is_map()) {
-			parse_one_vp(vp_node);
-		}
-	}
+	// VendorPlacement: optional placement constraints (Map / MinSpacing / MaxVendors / Area).
+	// They are kept per map and apply to every vendor shell, whichever entry names them.
+	if (this->nodeExists(node, "VendorPlacement"))
+		this->parsePlacements(node[c4::to_csubstr("VendorPlacement")], key);
+
+	if (entry.goods == 0) // nostalRE
+		entry.goods = entry.dynamic ? PopVendorGoods::Loot : PopVendorGoods::Supplies;
 
 	entries_[key] = std::move(entry);
 	return 1;
@@ -1162,6 +1227,7 @@ static void applyProfile(PopulationEngine* dst, const PopulationEngine& src)
 	// Vendor
 	dst->vendor_message = src.vendor_message;
 	dst->vendor_key     = src.vendor_key;
+	dst->vendor_keys    = src.vendor_keys; // nostalRE
 	// Flags and role
 	dst->flags     = src.flags;
 	dst->role_type = src.role_type;
@@ -1287,6 +1353,7 @@ uint64 PopulationEngineDatabase::parseBodyNode(const ryml::NodeRef& node)
 		}
 		if (this->nodeExists(node, "VendorMessage")) this->asString(node, "VendorMessage", prof->vendor_message);
 		if (this->nodeExists(node, "VendorKey"))     this->asString(node, "VendorKey",     prof->vendor_key);
+		if (this->nodeExists(node, "VendorKeys"))    this->parseVendorKeys(node, prof->vendor_keys); // nostalRE
 		// Role
 		if (this->nodeExists(node, "Role")) {
 			std::string rs;
@@ -1741,12 +1808,17 @@ uint64 PopulationEngineDatabase::parseBodyNode(const ryml::NodeRef& node)
 	} else if (!exists && !from_profile) {
 		equipment->vendor_key.clear();
 	}
+	if (this->nodeExists(node, "VendorKeys")) { // nostalRE
+		this->parseVendorKeys(node, equipment->vendor_keys);
+	} else if (!exists && !from_profile) {
+		equipment->vendor_keys.clear();
+	}
 
 	// Auto-promote behavior to Vendor when a VendorKey is set but no explicit
 	// Behavior / TownBehavior was provided. Without this the placement-driven
 	// autosummon pass cannot identify vendor jobs and merchant shells in towns
 	// would behave as Combat by default.
-	if (!equipment->vendor_key.empty() &&
+	if ((!equipment->vendor_key.empty() || !equipment->vendor_keys.empty()) &&
 	    equipment->behavior      == PopulationBehavior::Combat &&
 	    equipment->town_behavior == PopulationBehavior::None) {
 		equipment->town_behavior = PopulationBehavior::Vendor;

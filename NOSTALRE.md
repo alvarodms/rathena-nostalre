@@ -126,6 +126,24 @@ files we do not use. Our changes carry a `nostalRE` comment:
 - Sages, Professors and Sorcerers cast Dispell only on players: a new skill
   condition, `enemy_is_player`, keeps it for PvP and the arena. Against monsters
   it was mostly wasted SP, and it could even thaw a monster someone had frozen.
+- Vendor shells stand in the main towns: one `VendorPlacement:` list at the end
+  of `db/population_vendors.yml` (a body entry without `VendorKey`) names the
+  maps, Prontera with the most, each with a box around the town centre. Upstream
+  put them all on `prt_mk`, which no warp leads to. A vendor's cell keeps 3 cells
+  from any NPC or warp and skips `novending`; it holds its stall for a random
+  shift (`population_engine_vendor_shift_min_ms`/`_max_ms`, 15-45 min), then a
+  new vendor opens elsewhere in the box. Untradeable items are left out of the
+  stock (one used to refuse the whole shop), and a shop that still fails is
+  logged and its shell released. `@populate vendors` lists the map's shops.
+- The app's AI shop settings, each a battle key: `population_engine_vendor_pct`
+  (shops per town, apart from density), `_towns` (placement `Tier:` capital,
+  main or minor; 12 minor towns added), `_price_pct`, `_loot`/`_supplies`/`_gear`
+  (each shop's `Goods:`) and `_cards` (up to 2 non-MVP cards at `CardPrice:` in
+  shops marked `CardsBySetting`). A merchant job lists its shops by weight in
+  `VendorKeys:` and opens one of the kinds switched on; Alchemists and Creators
+  sell potions and buff items, smiths dungeon finds or starter gear. With AI
+  shops off, no shop merchants spawn (the pass counted open shops only and kept
+  adding sitting merchants up to the cap).
 
 ## Building the Android servers
 

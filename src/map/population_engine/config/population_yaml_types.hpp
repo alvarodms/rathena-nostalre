@@ -108,6 +108,9 @@ struct PopulationEngine {
 	std::string vendor_message;
 	/// Optional key into db/population_vendors.yml (VendorKey:). Empty = built-in default stock.
 	std::string vendor_key;
+	/// nostalRE: VendorKeys: {key: weight, ...}, the shops this job may open, picked by weight
+	/// among the kinds the settings allow; overrides vendor_key when set.
+	std::vector<std::pair<std::string, uint32_t>> vendor_keys;
 
 	/// Phase 2 identity: -1 / unset = use engine defaults (random or job rule).
 	int16_t str_min = -1, str_max = -1;
@@ -169,8 +172,18 @@ struct PopulationVendorStock {
 };
 
 /// A named vendor configuration entry from db/population_vendors.yml.
+/// nostalRE: what a vendor sells (Goods:), each kind switched by its own battle setting.
+namespace PopVendorGoods {
+	constexpr uint8_t Loot     = 0x1; ///< monster drops (population_engine_vendor_loot)
+	constexpr uint8_t Supplies = 0x2; ///< potions, buff items, ammo (population_engine_vendor_supplies)
+	constexpr uint8_t Gear     = 0x4; ///< equipment (population_engine_vendor_gear)
+}
+
 struct PopulationVendorEntry {
 	std::string key;
+	uint8_t     goods = 0;       ///< nostalRE: PopVendorGoods kind (Goods:; default loot for dynamic, supplies for static)
+	bool        cards_by_setting = false; ///< nostalRE: ItemFlags CardsBySetting: cards when population_engine_vendor_cards is on
+	uint32_t    card_price = 300000;      ///< nostalRE: CardPrice: one card's price, before population_engine_vendor_price_pct
 	std::string title;           ///< Overhead vend title (empty = "Shop")
 	bool        dynamic = false; ///< Derive stock from map mob drop tables at spawn time
 	int         max_slots = 12;  ///< Cap vend slots (MC_VENDING lv10 = 12)
@@ -202,6 +215,7 @@ struct PopulationVendorPlacement {
 	int min_spacing = 0;         ///< Minimum cells between two vendor shells (0 = no spacing check).
 	int max_vendors = 0;         ///< Hard cap on simultaneous vendor shells on this map (0 = unlimited).
 	int16_t area_x1 = -1, area_y1 = -1, area_x2 = -1, area_y2 = -1; ///< Optional bounding box (-1 = whole map).
+	uint8_t tier = 1;            ///< nostalRE: Tier: 0 capital, 1 main, 2 minor; population_engine_vendor_towns is the highest tier with shops.
 };
 
 #endif // POPULATION_YAML_TYPES_HPP
