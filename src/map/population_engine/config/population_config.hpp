@@ -127,10 +127,15 @@ public:
 	/// Set after construction; pass the shared-templates DB so parseBodyNode
 	/// can fall back for unknown GearSet:/Profile: references.
 	void set_shared_source(const PopulationEngineDatabase* src) { m_shared_source = src; }
+	/// nostalRE: a gear set by name, for personality builds (GearSet:); nullptr if unknown.
+	const PopulationGearSet* gear_set(const std::string& name) const { return find_gear_set(name); }
 };
 
 class PopulationSkillDatabase : public YamlDatabase {
 	std::unordered_map<uint16_t, std::vector<s_pop_skill_entry>> jobs_;
+	/// nostalRE: entries with a Name: are skill sets a personality build picks (SkillSet:); the job's
+	/// unnamed entry stays its default.
+	std::unordered_map<std::string, std::vector<s_pop_skill_entry>> sets_;
 
 public:
 	PopulationSkillDatabase();
@@ -138,7 +143,10 @@ public:
 	const std::string getDefaultLocation() override;
 	uint64 parseBodyNode(const ryml::NodeRef& node) override;
 	const std::vector<s_pop_skill_entry>* find(uint16_t job_id) const;
+	/// A named skill set (nullptr if none has that Name:).
+	const std::vector<s_pop_skill_entry>* find_set(const std::string& name) const;
 	size_t job_count() const;
+	size_t set_count() const { return sets_.size(); }
 };
 
 class PopulationVendorDatabase : public YamlDatabase {

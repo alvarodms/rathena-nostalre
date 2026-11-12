@@ -96,6 +96,28 @@ files we do not use. Our changes carry a `nostalRE` comment:
   whole weapon pool gets the plainest weapon of that kind its job can wear.
   Off, and arena and `@populate` shells either way: the profile's range or 99/70.
   `@populate levels` lists the shells on your map.
+- Personalities (`db/population_personality.yml`, `population_personality_db.cpp`):
+  each autosummoned shell rolls a build and a temperament at spawn. A build is
+  what a player made of their class and links to the other files: the jobs it is
+  for (by weight), a skill set (a `Name:` entry in `db/population_skill_db.yml`,
+  whose unnamed entry per job stays the default), a gear set from
+  `db/population_gear_sets.yml`, stat ranges, names and chat. A temperament is how
+  they play, whatever their class: reaction time when a fight starts, precision
+  (the share of choices that are its best, and of dodges it makes) and idle
+  pauses after a kill.
+  Both weigh the kinds of skill they prefer. A job with no build keeps its
+  `population_engine.yml` entry and still gets a temperament. Builds so far:
+  Priest (support, battle), Wizard (area, bolts), Knight (two-handed, spear),
+  Hunter (traps, arrows). `@populate levels` shows `build/temperament`, reaction,
+  precision, the skills and basic attacks it chose and the pauses it took. Shells
+  only act within sight of a player, as before.
+- `population_engine_scored_skills` (on): a shell weighs its usable skills and a
+  basic attack instead of rotating them: the skill's `Rate` as a weight, the
+  element against the target, cast time and delay, SP, the monsters an area skill
+  would hit, a primed combo finisher, and its personality's `Prefers`. Skill
+  entries may say what they are for with `Kind:`. The conditions still decide
+  what can be cast. A caster waits out its delay instead of meleeing. Off: the
+  old rotation, with `population_engine_shell_basic_attack_chance`.
 
 ## Building the Android servers
 

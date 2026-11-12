@@ -536,6 +536,11 @@ void population_shell_target_change(map_session_data *sd, int id)
 	if (pe.target_id > 0 && id == 0)
 		pe.target_lost_tick = gettick();
 	else if (id > 0) {
+		// nostalRE: engaging from idle takes its temperament's reaction time (give or take a third).
+		// Not a switch mid-fight: the engine switches often (a closer monster, a pack's target), and
+		// each would push the delay back.
+		if (pe.reaction_ms > 0 && pe.target_id == 0)
+			pe.react_until = gettick() + pe.reaction_ms * rnd_value(70, 130) / 100;
 		pe.target_lost_tick = 0;
 		pe.move_fail_count = 0;
 		pe.attack_fail_count = 0;

@@ -470,3 +470,74 @@ Body:
       - Ring
     AccR:
       - Ring
+  # nostalRE: gear sets for personality builds (db/population_personality.yml GearSet:)
+  - GearSetName: para_battle_priest   # Priest / High Priest who melee: a mace and a shield
+    HeadTop:
+      - Para_Team_Hat
+      - Apple_Of_Archer
+      - Big_Sis'_Ribbon
+    HeadMid:
+      - Luxury_Sunglasses
+    HeadBottom:
+      - Centimental_Flower
+      - Cigar
+    Armor:
+      - Para_Team_Uniform1
+      - Para_Team_Uniform2
+      - Para_Team_Uniform3
+    Weapon:
+      - Mace
+      - Morning_Star
+      - Chain
+      - Stunner
+      - Sword_Mace
+    Shield:
+      - Buckler
+      - Guard
+      - Shield
+    Garment:
+      - Para_Team_Manteau
+    Shoes:
+      - Para_Team_Boots1
+      - Para_Team_Boots2
+      - Para_Team_Boots3
+    AccL:
+      - Ring
+    AccR:
+      - Ring
+
+  - GearSetName: para_knight_spear    # Knight / Lord Knight with a one-handed spear and a shield
+    HeadTop:
+      - Bone_Helm_
+      - Helm_
+      - Para_Team_Hat
+    HeadMid:
+      - Fin_Helm
+      - Elven_Ears
+    HeadBottom:
+      - Centimental_Leaf
+      - Cigar
+    Armor:
+      - Para_Team_Uniform1
+      - Para_Team_Uniform2
+      - Para_Team_Uniform3
+    Weapon:
+      - Pike
+      - Guisarme
+      - Glaive
+      - Partizan
+      - Trident
+    Shield:
+      - Buckler
+      - Shield
+      - Mirror_Shield
+    Garment:
+      - Para_Team_Manteau
+    Shoes:
+      - Para_Team_Boots1
+      - Para_Team_Boots2
+      - Para_Team_Boots3
+    AccL:
+      - Ring_
+    AccR:
+      - Ring_

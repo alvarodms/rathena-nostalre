@@ -9,6 +9,7 @@
 #include "core/pe_perf.cpp"
 #include "config/population_config.cpp"
 #include "config/population_skill_db.cpp"
+#include "config/population_personality_db.cpp" // nostalRE
 #include "config/population_spawn_db.cpp"
 #include "runtime/population_engine_combat.cpp"
 #include "runtime/population_engine_path.cpp"

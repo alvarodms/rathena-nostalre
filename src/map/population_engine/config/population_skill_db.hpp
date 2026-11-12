@@ -53,6 +53,14 @@ enum class PopSkillCondition : uint8_t {
 	SkillUsed           = 34, ///< A specific skill (cond_value_str) was used against this shell within the last 3 seconds. Mirrors mob_skill_db `skillused`. cond_sc_resolved holds resolved skill ID.
 };
 
+/// nostalRE: what a skill is for, which the scored picker (population_engine_scored_skills) weighs by.
+/// Auto: worked out from the skill (no damage: debuff; splash or ground: aoe; else damage).
+/// Melee is the basic attack; it is never a skill's kind, only a key in a personality's Prefers.
+enum class PopSkillKind : uint8_t {
+	Auto = 0, Damage, Aoe, Heal, Buff, Debuff, Defend, Escape, Melee,
+	Count
+};
+
 /// One skill entry from population_skill_db.yml.
 struct s_pop_skill_entry {
 	uint16_t skill_id  = 0;      ///< Resolved skill ID (0 = invalid/skip)
@@ -67,4 +75,5 @@ struct s_pop_skill_entry {
 	uint8_t  cond_value_num = 0; ///< Numeric threshold (HP%, SP%, cell count, zone id)
 	std::string cond_value_str;  ///< SC name for status conditions (e.g. "stun")
 	std::shared_ptr<expanded_ai::ExpandedCondition> expanded; ///< Set when condition == Expanded; null otherwise.
+	PopSkillKind kind = PopSkillKind::Auto; ///< nostalRE: YAML Kind:, for the scored picker
 };

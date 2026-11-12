@@ -89,6 +89,12 @@ static const std::unordered_map<std::string, uint8_t> s_race_map = {
 	{ "Dragon",    9 },
 };
 
+static const std::unordered_map<std::string, PopSkillKind> s_kind_map = {
+	{ "damage", PopSkillKind::Damage }, { "aoe",    PopSkillKind::Aoe    }, { "heal",   PopSkillKind::Heal   },
+	{ "buff",   PopSkillKind::Buff   }, { "debuff", PopSkillKind::Debuff }, { "defend", PopSkillKind::Defend },
+	{ "escape", PopSkillKind::Escape },
+};
+
 static const std::unordered_map<std::string, uint8_t> s_zone_map = {
 	{ "town",    1 }, { "field", 2 }, { "dungeon", 3 },
 };
@@ -105,6 +111,7 @@ PopulationSkillDatabase::PopulationSkillDatabase()
 void PopulationSkillDatabase::clear()
 {
 	this->jobs_.clear();
+	this->sets_.clear();
 }
 
 const std::string PopulationSkillDatabase::getDefaultLocation()
@@ -188,6 +195,16 @@ uint64 PopulationSkillDatabase::parseBodyNode(const ryml::NodeRef& node)
 		e.around_target = around_target;
 		e.cooldown_ms  = cooldown_ms;
 
+		if (this->nodeExists(row, "Kind")) {
+			std::string kv;
+			this->asString(row, "Kind", kv);
+			const auto kit = s_kind_map.find(kv);
+			if (kit != s_kind_map.end())
+				e.kind = kit->second;
+			else
+				this->invalidWarning(row[c4::to_csubstr("Kind")], "population_skill_db: unknown Kind '%s' for skill %d -- worked out from the skill.\n", kv.c_str(), sid);
+		}
+
 		// Parse Condition. Three accepted shapes:
 		//   1. scalar string  — legacy flat-enum token ("hp_below")
 		//   2. sequence       — implicit AND of expanded tokens / nested maps
@@ -264,8 +281,25 @@ uint64 PopulationSkillDatabase::parseBodyNode(const ryml::NodeRef& node)
 	if (skills.empty())
 		return 0;
 
+	// nostalRE: a named entry is a skill set for personality builds and leaves the job's default alone
+	if (this->nodeExists(node, "Name")) {
+		std::string set_name;
+		this->asString(node, "Name", set_name);
+		if (!set_name.empty()) {
+			const uint64 count = static_cast<uint64>(skills.size());
+			this->sets_[set_name] = std::move(skills);
+			return count;
+		}
+	}
+
 	this->jobs_[job_id] = std::move(skills);
 	return static_cast<uint64>(this->jobs_[job_id].size());
+}
+
+const std::vector<s_pop_skill_entry>* PopulationSkillDatabase::find_set(const std::string& name) const
+{
+	auto it = this->sets_.find(name);
+	return (it != this->sets_.end()) ? &it->second : nullptr;
 }
 
 const std::vector<s_pop_skill_entry>* PopulationSkillDatabase::find(uint16_t job_id) const

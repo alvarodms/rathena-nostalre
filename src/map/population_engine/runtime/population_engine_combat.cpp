@@ -744,6 +744,38 @@ static inline bool pop_skill_cond_satisfied(map_session_data* sd, const SkillT& 
 	return population_shell_skill_condition_ok(sd, sk.condition, sk.cond_value_num, sk.cond_sc_resolved, target_bl);
 }
 
+/// Whether a rotation entry can be cast now: its condition, the shell's state, its cooldown, its
+/// level and SP (and the SP floor). Rate and line of sight are the caller's.
+static bool pop_attack_skill_usable(map_session_data *sd, const PopulationShellCombatSkill &sk, block_list *target_bl,
+	t_tick now_tick, uint32 sp_floor, bool strict_gate)
+{
+	if (!pop_skill_cond_satisfied(sd, sk, target_bl))
+		return false;
+	if (skill_isNotOk(sk.skill_id, *sd))
+		return false;
+	// Strict gate: status_check_skilluse covers silenced/sleeping/sitting/etc.
+	if (strict_gate && !status_check_skilluse(sd, target_bl, sk.skill_id, 0))
+		return false;
+	// Per-skill cooldown gate (set after a successful cast in dispatchers).
+	if (sk.cooldown_ms > 0) {
+		auto cd_it = sd->pop.skill_next_use_tick.find(sk.skill_id);
+		if (cd_it != sd->pop.skill_next_use_tick.end() && now_tick < cd_it->second)
+			return false;
+	}
+	// YAML is authoritative for shells: if the player class doesn't have the skill
+	// learned (e.g. Monk casting TF_HIDING), still allow the cast at the YAML level.
+	const uint16_t plv = pc_checkskill(sd, sk.skill_id);
+	if (plv > 0 && plv < sk.skill_lv)
+		return false;
+	const int sp_cost = skill_get_sp(sk.skill_id, sk.skill_lv);
+	if (sp_cost > sd->status.sp)
+		return false;
+	// SP-reserve floor: don't pick a skill that drops us below the configured floor.
+	if (sp_floor > 0 && static_cast<uint32>(sd->status.sp) - static_cast<uint32>(sp_cost) < sp_floor)
+		return false;
+	return true;
+}
+
 static void population_shell_pick_attack_skill(map_session_data *sd, uint16 &skill_id, uint16 &skill_lv, block_list* target_bl = nullptr, bool ignore_rate = false, bool ally_only = false)
 {
 	skill_id = 0;
@@ -856,37 +888,8 @@ static void population_shell_pick_attack_skill(map_session_data *sd, uint16 &ski
 				return;
 			}
 		}
-		if (!pop_skill_cond_satisfied(sd, sk, target_bl)) {
+		if (!pop_attack_skill_usable(sd, sk, target_bl, now_tick, sp_floor, strict_gate))
 			continue;
-		}
-		if (skill_isNotOk(sk.skill_id, *sd)) {
-			continue;
-		}
-		// Strict gate: status_check_skilluse covers silenced/sleeping/sitting/etc.
-		if (strict_gate && !status_check_skilluse(sd, target_bl, sk.skill_id, 0)) {
-			continue;
-		}
-		// Per-skill cooldown gate (set after a successful cast in dispatchers).
-		if (sk.cooldown_ms > 0) {
-			auto cd_it = sd->pop.skill_next_use_tick.find(sk.skill_id);
-			if (cd_it != sd->pop.skill_next_use_tick.end() && now_tick < cd_it->second) {
-				continue;
-			}
-		}
-		// YAML is authoritative for shells: if the player class doesn't have the skill
-		// learned (e.g. Monk casting TF_HIDING), still allow the cast at the YAML level.
-		const uint16_t plv = pc_checkskill(sd, sk.skill_id);
-		if (plv > 0 && plv < sk.skill_lv) {
-			continue;
-		}
-		const int sp_cost = skill_get_sp(sk.skill_id, sk.skill_lv);
-		if (sp_cost > sd->status.sp) {
-			continue;
-		}
-		// SP-reserve floor: don't pick a skill that drops us below the configured floor.
-		if (sp_floor > 0 && static_cast<uint32>(sd->status.sp) - static_cast<uint32>(sp_cost) < sp_floor) {
-			continue;
-		}
 		// LOS already validated once above for the whole rotation — no per-skill A* here.
 		skill_id = sk.skill_id;
 		skill_lv = sk.skill_lv;
@@ -898,6 +901,217 @@ static void population_shell_pick_attack_skill(map_session_data *sd, uint16 &ski
 	// Nothing found — advance cursor by 1 so next tick doesn't retry the same start.
 	if (use_cursor && n > 0)
 		sd->pop.attack_skill_cursor = static_cast<uint8_t>((cursor_start + 1) % n);
+}
+
+// ---- nostalRE: the scored picker (population_engine_scored_skills) ----------------------------
+// A shell weighs every skill it can cast now, and a basic attack, and mostly takes the best: its
+// precision (from its temperament) is the share of choices that are its best; the rest are drawn
+// by score. A skill's score is its Rate as a weight, times what its personality prefers for that
+// kind of skill, times how well it suits the moment: the element against the target, the time
+// it takes, the SP it leaves, the monsters an area skill would hit, and a finisher whose combo
+// condition holds. The conditions in population_skill_db.yml still decide what can be cast at all.
+
+/// What a rotation entry is for: its YAML Kind:, else worked out from the skill.
+static PopSkillKind pop_skill_kind(const PopulationShellCombatSkill &sk)
+{
+	if (sk.kind != 0)
+		return static_cast<PopSkillKind>(sk.kind);
+	const int inf = skill_get_inf(sk.skill_id);
+	if (skill_get_nk(sk.skill_id, NK_NODAMAGE))
+		return (inf & INF_SELF_SKILL) ? PopSkillKind::Buff : PopSkillKind::Debuff;
+	if (skill_get_splash(sk.skill_id, sk.skill_lv) > 0 || (inf & (INF_GROUND_SKILL | INF_TRAP_SKILL)))
+		return PopSkillKind::Aoe;
+	return PopSkillKind::Damage;
+}
+
+static double pop_prefers(const map_session_data *sd, PopSkillKind kind)
+{
+	return sd->pop.prefers[static_cast<size_t>(kind)] / 100.0;
+}
+
+/// Damage against the target's element, as a factor (0 = it does nothing).
+static double pop_element_factor(const map_session_data *sd, int32 atk_ele, block_list *target_bl)
+{
+	if (target_bl == nullptr)
+		return 1.0;
+	if (atk_ele < ELE_NEUTRAL || atk_ele >= ELE_MAX)
+		atk_ele = sd->battle_status.rhw.ele; // the weapon's element (or an endowment)
+	const status_data *ts = status_get_status_data(*target_bl);
+	if (ts == nullptr)
+		return 1.0;
+	return std::clamp(elemental_attribute_db.getAttribute(ts->ele_lv, static_cast<uint16>(atk_ele), ts->def_ele) / 100.0, 0.0, 2.0);
+}
+
+static int32 pop_count_mobs_cb(block_list *bl, va_list ap)
+{
+	int *count = va_arg(ap, int *);
+	if (!status_isdead(*bl))
+		++*count;
+	return 0;
+}
+
+/// How much a basic attack appeals to this shell before the moment: its build's MeleeWeight, else
+/// by weapon (staves and books hardly, ranged weapons a fair bit, the rest a lot).
+static double pop_melee_base(const map_session_data *sd)
+{
+	if (sd->pop.melee_weight >= 0)
+		return sd->pop.melee_weight / 100.0;
+	switch (sd->status.weapon) {
+	case W_STAFF: case W_2HSTAFF: case W_BOOK:
+		return 0.1;
+	case W_BOW: case W_MUSICAL: case W_WHIP: case W_REVOLVER: case W_RIFLE: case W_GATLING: case W_SHOTGUN: case W_GRENADE:
+		return 0.7;
+	default:
+		return 0.8;
+	}
+}
+
+static double pop_skill_score(map_session_data *sd, const PopulationShellCombatSkill &sk, block_list *target_bl)
+{
+	const PopSkillKind kind = pop_skill_kind(sk);
+	double score = (sk.rate / 10000.0) * pop_prefers(sd, kind);
+
+	// Time it ties the shell up: a 1 s cast and delay is the norm.
+	const int32 busy = skill_get_cast(sk.skill_id, sk.skill_lv) + skill_get_delay(sk.skill_id, sk.skill_lv);
+	score *= std::clamp(1500.0 / (std::max(0, busy) + 500.0), 0.3, 2.0);
+	// SP it would take out of what is left.
+	const int32 sp_cost = skill_get_sp(sk.skill_id, sk.skill_lv);
+	if (sp_cost > 0)
+		score *= std::clamp(1.0 - 0.5 * sp_cost / std::max(1, static_cast<int32>(sd->status.sp)), 0.3, 1.0);
+
+	const status_data *ts = target_bl != nullptr ? status_get_status_data(*target_bl) : nullptr;
+	const int32 hp_pct = (ts != nullptr && ts->max_hp > 0) ? static_cast<int32>(100LL * ts->hp / ts->max_hp) : 100;
+	if (kind == PopSkillKind::Damage || kind == PopSkillKind::Aoe) {
+		score *= pop_element_factor(sd, skill_get_ele(sk.skill_id, sk.skill_lv), target_bl);
+		if (hp_pct < 20 && busy > 1200)
+			score *= 0.5; // a long cast on what one hit finishes
+	}
+	if (kind == PopSkillKind::Aoe && target_bl != nullptr) {
+		int count = 0;
+		map_foreachinrange(pop_count_mobs_cb, target_bl, std::max(1, skill_get_splash(sk.skill_id, sk.skill_lv)), BL_MOB, &count);
+		score *= count <= 1 ? 0.5 : std::pow(std::min(count, 6), 0.7);
+	}
+	if (kind == PopSkillKind::Debuff && hp_pct < 30)
+		score *= 0.3; // not worth it on a monster about to die
+	// A finisher whose combo is primed (target frozen, the skill before it cast).
+	if (sk.condition == static_cast<uint8_t>(PopSkillCondition::EnemyStatus) || sk.condition == static_cast<uint8_t>(PopSkillCondition::AfterSkill))
+		score *= 2.0;
+	return std::max(0.0, score);
+}
+
+static double pop_melee_score(map_session_data *sd, block_list *target_bl)
+{
+	return pop_melee_base(sd) * pop_prefers(sd, PopSkillKind::Melee) * pop_element_factor(sd, -1, target_bl);
+}
+
+/// The scored choice. Sets skill_id/skill_lv to a skill, or leaves them 0 with `melee` true when a
+/// basic attack won (only when `allow_melee`), or both empty when nothing can be done.
+static void population_shell_pick_attack_skill_scored(map_session_data *sd, uint16 &skill_id, uint16 &skill_lv,
+	block_list *target_bl, bool allow_melee, bool &melee)
+{
+	skill_id = 0;
+	skill_lv = 0;
+	melee = false;
+	const t_tick now_tick = gettick();
+	const int min_sp_pct = battle_config.population_engine_shell_skill_min_sp_pct;
+	const uint32 sp_floor = (min_sp_pct > 0 && sd->status.max_sp > 0)
+		? static_cast<uint32>(sd->status.max_sp) * static_cast<uint32>(min_sp_pct) / 100u : 0u;
+	const bool strict_gate = battle_config.population_engine_shell_skill_strict_gate != 0;
+	const bool los_ok = target_bl == nullptr || battle_config.population_engine_shell_skill_los_check == 0
+		|| path_search_long(nullptr, sd->m, sd->x, sd->y, target_bl->x, target_bl->y, CELL_CHKWALL);
+
+	struct Option { const PopulationShellCombatSkill *sk; double score; };
+	std::vector<Option> options;
+	options.reserve(sd->pop.attack_skills.size() + 1);
+	if (los_ok) {
+		for (const PopulationShellCombatSkill &sk : sd->pop.attack_skills) {
+			if (!sk.active || sk.skill_id == 0 || sk.rate == 0 || sk.target == 2)
+				continue;
+			if (!pop_attack_skill_usable(sd, sk, target_bl, now_tick, sp_floor, strict_gate))
+				continue;
+			const double score = pop_skill_score(sd, sk, target_bl);
+			if (score > 0.0)
+				options.push_back({ &sk, score });
+		}
+	}
+	if (allow_melee) {
+		const double score = pop_melee_score(sd, target_bl);
+		if (score > 0.0)
+			options.push_back({ nullptr, score });
+	}
+	if (options.empty())
+		return;
+
+	const Option *picked = &*std::max_element(options.begin(), options.end(),
+		[](const Option &a, const Option &b) { return a.score < b.score; });
+	if (static_cast<int>(rnd() % 100) >= sd->pop.precision) {
+		// Not its best this time: any option, by score.
+		double total = 0.0;
+		for (const Option &o : options)
+			total += o.score;
+		double roll = (rnd() % 10000) / 10000.0 * total;
+		for (const Option &o : options) {
+			if (roll < o.score) {
+				picked = &o;
+				break;
+			}
+			roll -= o.score;
+		}
+	}
+	if (picked->sk == nullptr) {
+		melee = true;
+		return;
+	}
+	skill_id = picked->sk->skill_id;
+	skill_lv = picked->sk->skill_lv;
+}
+
+/// Sets a skill's own cooldown after it was cast.
+static void pop_start_skill_cooldown(map_session_data *sd, uint16 skill_id, t_tick now)
+{
+	for (const auto &sk : sd->pop.attack_skills) {
+		if (sk.skill_id == skill_id && sk.cooldown_ms > 0) {
+			sd->pop.skill_next_use_tick[skill_id] = now + static_cast<t_tick>(sk.cooldown_ms);
+			return;
+		}
+	}
+}
+
+/// A fight with the target in reach, scored: when a choice is due it casts the skill that wins, or
+/// swings a few times when a basic attack wins. Between choices it keeps swinging only if it is
+/// the swinging kind (or chose to); a caster waits out its delay.
+static void population_shell_scored_attack(map_session_data *sd, uint32 tid, t_tick now, bool do_skills,
+	bool skill_only, bool attack_only)
+{
+	s_population &pe = sd->pop;
+	const bool choice_due = !attack_only && do_skills && now >= pe.skill_cd && battle_config.population_engine_shell_attackskill;
+	if (choice_due) {
+		uint16 skill_id = 0, skill_lv = 0;
+		bool melee = false;
+		block_list *target_bl = map_id2bl(static_cast<int>(tid));
+		if (!population_shell_pick_sphere_chain_skill(sd, skill_id, skill_lv))
+			population_shell_pick_attack_skill_scored(sd, skill_id, skill_lv, target_bl, !skill_only, melee);
+		if (skill_id != 0) {
+			pe.melee_chosen = false;
+			if (population_shell_try_attack(sd, tid, skill_id, skill_lv)) {
+				pop_start_skill_cooldown(sd, skill_id, now);
+				pe.acts_skill++;
+			}
+			return;
+		}
+		if (skill_only)
+			return;
+		// A basic attack won, or nothing else can be done now: a few swings before the next choice.
+		pe.melee_chosen = true;
+		if (population_shell_try_attack(sd, tid, 0, 0)) {
+			pe.acts_melee++;
+			const t_tick swing = std::max<t_tick>(status_get_adelay(sd), 300);
+			pe.skill_cd = now + swing * (melee ? rnd_value(2, 4) : 1);
+		}
+		return;
+	}
+	if (attack_only || (!skill_only && (pe.melee_chosen || pop_melee_base(sd) >= 0.3)))
+		population_shell_try_attack(sd, tid, 0, 0);
 }
 
 /// Returns true for skills that rAthena validates against real party membership
@@ -1237,6 +1451,15 @@ static void population_shell_combat_process_tick(map_session_data *sd, t_tick cu
 					bool incoming = false;
 					map_foreachinrange(pop_being_cast_on_cb, sd, AREA_SIZE, BL_CHAR,
 					                   &incoming, sd->id, static_cast<int>(sd->x), static_cast<int>(sd->y), 3);
+					// nostalRE: only as often as its precision; a missed dodge stays missed a moment
+					if (incoming && sd->pop.precision < 100) {
+						if (DIFF_TICK(current_tick, sd->pop.panic_roll_until) < 0)
+							incoming = false;
+						else if (static_cast<int>(rnd() % 100) >= sd->pop.precision) {
+							sd->pop.panic_roll_until = current_tick + 1500;
+							incoming = false;
+						}
+					}
 					if (incoming) {
 						unit_data *ud = unit_bl2ud(sd);
 						if (ud) {
@@ -1429,10 +1652,18 @@ static void population_shell_combat_process_tick(map_session_data *sd, t_tick cu
 			population_shell_check_target_for_movement(sd, tid) && unit_is_walking(sd))
 		return;
 
+	// nostalRE: it takes its temperament's reaction time to act on a new target
+	if (tid > 0 && pe.react_until != 0 && DIFF_TICK(current_tick, pe.react_until) < 0)
+		return;
+
 	if (tid > 0 && population_shell_check_target(sd, tid)) {
 		uint16 skill_id = 0;
 		uint16 skill_lv = 0;
 		sd->pop.safetywall_kited_since = 0;  // target is attackable — kite resolved
+		if (battle_config.population_engine_scored_skills) { // nostalRE
+			population_shell_scored_attack(sd, tid, current_tick, do_skills, flag_skill_only, flag_attack_only);
+			return;
+		}
 		// Basic-attack chance: roll BEFORE evaluating the skill picker. Without this,
 		// any rotation slot at Rate:10000 is selected every tick (round-robin still
 		// guarantees a hit) and the shell never basic-attacks. SkillOnly opts out.
@@ -1456,6 +1687,8 @@ static void population_shell_combat_process_tick(map_session_data *sd, t_tick cu
 		// attack_only wins if both flags are set (avoids paralysis).
 		if (!flag_skill_only || flag_attack_only || skill_id != 0) {
 			bool fired = population_shell_try_attack(sd, tid, skill_id, skill_lv);
+			if (fired && skill_id != 0)
+				sd->pop.acts_skill++; // nostalRE: @populate levels
 			if (fired && skill_id != 0) {
 				for (const auto &sk : sd->pop.attack_skills) {
 					if (sk.skill_id == skill_id && sk.cooldown_ms > 0) {
@@ -1482,10 +1715,15 @@ static void population_shell_combat_process_tick(map_session_data *sd, t_tick cu
 				uint16 skill_id = 0;
 				uint16 skill_lv = 0;
 				bool sphere_chain_picked = population_shell_pick_sphere_chain_skill(sd, skill_id, skill_lv);
-				if (!sphere_chain_picked)
+				bool melee = false;
+				if (!sphere_chain_picked && battle_config.population_engine_scored_skills) // nostalRE
+					population_shell_pick_attack_skill_scored(sd, skill_id, skill_lv, target_bl, false, melee);
+				else if (!sphere_chain_picked)
 					population_shell_pick_attack_skill(sd, skill_id, skill_lv, target_bl);
 				if (skill_id != 0) {
 					bool fired = population_shell_try_attack(sd, tid, skill_id, skill_lv);
+					if (fired)
+						sd->pop.acts_skill++;
 					if (fired) {
 						for (const auto &sk : sd->pop.attack_skills) {
 							if (sk.skill_id == skill_id && sk.cooldown_ms > 0) {
@@ -1681,6 +1919,21 @@ static void population_shell_push_attack_skill_candidate(map_session_data *sd, u
 	out.push_back(row);
 }
 
+/// nostalRE: the skill list a shell plays from: its personality build's skill set (SkillSet:), else its
+/// job's, else its base job's.
+static const std::vector<s_pop_skill_entry> *population_shell_skill_entries(const map_session_data *sd, uint16_t base_job)
+{
+	if (sd->pop.build != nullptr && !sd->pop.build->skill_set.empty()) {
+		const std::vector<s_pop_skill_entry> *set = population_skill_db().find_set(sd->pop.build->skill_set);
+		if (set != nullptr && !set->empty())
+			return set;
+	}
+	const std::vector<s_pop_skill_entry> *db_skills = population_skill_db().find(sd->status.class_);
+	if (db_skills == nullptr || db_skills->empty())
+		db_skills = population_skill_db().find(base_job);
+	return db_skills;
+}
+
 /// Seed population shell attack list: population_skill_db.yml (Priority 0),
 /// else db/population_engine.yml `Skills:` (Priority 1),
 /// else learned skill tree scan (Priority 2).
@@ -1701,9 +1954,7 @@ static void population_shell_seed_attack_skills_if_empty(map_session_data *sd)
 
 		// Priority 0: population_skill_db.yml per-job overrides (highest priority; replaces job defaults).
 		{
-			const std::vector<s_pop_skill_entry> *db_skills = population_skill_db().find(sd->status.class_);
-			if (!db_skills || db_skills->empty())
-				db_skills = population_skill_db().find(base_job);
+			const std::vector<s_pop_skill_entry> *db_skills = population_shell_skill_entries(sd, base_job);
 			if (db_skills && !db_skills->empty()) {
 				for (const s_pop_skill_entry &e : *db_skills) {
 					if (e.state == 2)
@@ -1723,6 +1974,7 @@ static void population_shell_seed_attack_skills_if_empty(map_session_data *sd)
 					cs.around_target = e.around_target;
 					cs.cooldown_ms  = e.cooldown_ms;
 					cs.expanded     = e.expanded; // shared_ptr; no deep copy needed
+					cs.kind         = static_cast<uint8_t>(e.kind); // nostalRE
 				}
 				}
 				if (!cand.empty())
@@ -1756,9 +2008,7 @@ static void population_shell_seed_attack_skills_if_empty(map_session_data *sd)
 	// Seed self-buff and ally-buff maintenance lists from population_skill_db.yml Target:1/2 entries.
 	// Run independently of attack skill seeding so clearing buff skills re-seeds on next tick.
 	if (sd->pop.buff_skills.empty()) {
-		const std::vector<s_pop_skill_entry> *db_skills = population_skill_db().find(sd->status.class_);
-		if (!db_skills || db_skills->empty())
-			db_skills = population_skill_db().find(base_job);
+		const std::vector<s_pop_skill_entry> *db_skills = population_shell_skill_entries(sd, base_job);
 		if (db_skills) {
 			for (const s_pop_skill_entry &e : *db_skills) {
 				// Target:1 = self-buff maintenance.
@@ -1788,6 +2038,7 @@ static void population_shell_seed_attack_skills_if_empty(map_session_data *sd)
 				bs.around_target = e.around_target;
 				bs.cooldown_ms  = e.cooldown_ms;
 				bs.expanded     = e.expanded;
+				bs.kind         = static_cast<uint8_t>(e.kind); // nostalRE
 				sd->pop.buff_skills.push_back(bs);
 			}
 		}
@@ -1895,13 +2146,16 @@ void population_engine_shell_reactive_cast(map_session_data *sd)
 {
 	if (!sd || !sd->state.population_combat)
 		return;
+	// nostalRE: a shell with a reaction time answers a hit on a later tick, not the instant it lands
+	if (sd->pop.reaction_ms > 0)
+		return;
 	const t_tick now = gettick();
 	// --- Buff pass (Target:1 and Target:2 skills) ---
 	if (!sd->pop.buff_skills.empty())
 		population_shell_cast_expired_self_buffs(sd, now);
 	// --- Attack pass (Target:0 skills with conditional gates) ---
 	// Only fire if skill_cd allows it and there is a current enemy target.
-	if (sd->pop.attack_skills.empty())
+	if (sd->pop.attack_skills.empty() || battle_config.population_engine_scored_skills) // nostalRE: the tick weighs it
 		return;
 	if (sd->pop.skill_cd > now)
 		return;
@@ -2136,6 +2390,31 @@ int population_engine_combat_per_tick(map_session_data *sd, bool do_skills)
 			if (DIFF_TICK(gettick(), pe.last_move) > 3000)
 				sd->ud.canmove_tick = gettick();
 		}
+		population_shell_status_checkmapchange(sd);
+		return 0;
+	}
+
+	// nostalRE: now and then, after a kill (no attack of its own for a second), it stops and stands
+	// around a while (its temperament's Pauses), as a player looks away from the screen. A hit taken
+	// after it stopped ends it; a target handed over meanwhile (a pack's) waits for it.
+	if (pe.pause_until != 0) {
+		if (DIFF_TICK(current_tick, pe.pause_until) < 0 && DIFF_TICK(pe.last_attacked_tick, pe.pause_from) <= 0) {
+			population_shell_status_checkmapchange(sd);
+			return 0;
+		}
+		pe.pause_until = 0;
+		const PopTemperament *t = pe.temperament.get();
+		pe.next_pause_at = t != nullptr && t->pause_every_max > 0
+			? current_tick + 1000 * static_cast<t_tick>(rnd_value(t->pause_every_min, t->pause_every_max))
+			: 0;
+	} else if (pe.next_pause_at != 0 && DIFF_TICK(current_tick, pe.next_pause_at) >= 0 && pe.temperament != nullptr
+		&& DIFF_TICK(current_tick, pe.last_attack) > 1000) {
+		const PopTemperament *t = pe.temperament.get();
+		pe.pause_from = current_tick;
+		pe.pauses++;
+		pe.pause_until = current_tick + 1000 * std::max<t_tick>(1, rnd_value(t->pause_for_min, t->pause_for_max));
+		population_shell_target_change(sd, 0);
+		unit_stop_walking(sd, USW_NONE);
 		population_shell_status_checkmapchange(sd);
 		return 0;
 	}
