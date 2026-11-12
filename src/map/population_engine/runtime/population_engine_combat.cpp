@@ -1995,22 +1995,166 @@ static void population_shell_companion_pick_target(map_session_data *sd, const m
 		population_shell_target_change(sd, picked);
 }
 
+// Following like a player would: it notices its owner moved a moment later, trails a walking owner at its own
+// distance, and once the owner stops it takes its own spot around them, by role: a tank in front, healers,
+// casters and ranged weapons behind, the rest at a side. Now and then it shifts while the owner stands still.
+constexpr t_tick POP_COMPANION_REACT_MIN_MS = 300, POP_COMPANION_REACT_MAX_MS = 900;
+constexpr t_tick POP_COMPANION_SHUFFLE_MIN_MS = 8000, POP_COMPANION_SHUFFLE_MAX_MS = 20000;
+constexpr int POP_COMPANION_SPOT_RANGE = 8; // companions this close to the owner can hold a spot
+
+enum class PopCompanionRank { Front, Side, Back };
+
+static PopCompanionRank pop_companion_rank(const map_session_data *sd)
+{
+	const PopulationRoleType role = static_cast<PopulationRoleType>(sd->pop.role);
+	if (role == PopulationRoleType::Tank)
+		return PopCompanionRank::Front;
+	if (role == PopulationRoleType::Support)
+		return PopCompanionRank::Back;
+	switch (sd->status.weapon) {
+	case W_STAFF: case W_2HSTAFF: case W_BOOK: case W_BOW: case W_MUSICAL: case W_WHIP:
+	case W_REVOLVER: case W_RIFLE: case W_GATLING: case W_SHOTGUN: case W_GRENADE:
+		return PopCompanionRank::Back;
+	default:
+		return PopCompanionRank::Side;
+	}
+}
+
+struct PopCompanionSpotCtx {
+	const map_session_data *shell;
+	uint32 owner_char_id;
+	int16 x, y;
+	bool taken;
+};
+
+/// Someone stands on the cell, or another companion of the same owner has picked it.
+static int32 pop_companion_spot_taken_cb(block_list *bl, va_list ap)
+{
+	const map_session_data *other = BL_CAST(BL_PC, bl);
+	PopCompanionSpotCtx *ctx = va_arg(ap, PopCompanionSpotCtx *);
+	if (other == nullptr || other == ctx->shell)
+		return 0;
+	if ((other->x == ctx->x && other->y == ctx->y)
+		|| (other->pop.companion_owner == ctx->owner_char_id
+			&& other->pop.companion_spot_x == ctx->x && other->pop.companion_spot_y == ctx->y)) {
+		ctx->taken = true;
+		return 1;
+	}
+	return 0;
+}
+
+/// A free cell around the idle owner for this companion's rank, which it can walk to and its owner can see.
+static bool pop_companion_pick_spot(const map_session_data *sd, const map_session_data *owner, int16 &out_x, int16 &out_y)
+{
+	static constexpr double PI = 3.14159265358979323846;
+	const uint8 dir = unit_getdir(owner) % DIR_MAX;
+	const double facing = std::atan2(static_cast<double>(diry[dir]), static_cast<double>(dirx[dir]));
+	const PopCompanionRank rank = pop_companion_rank(sd);
+	const double side = (sd->id & 1) ? 1.0 : -1.0; // two side companions take different sides
+	const double base_angle = rank == PopCompanionRank::Front ? facing
+		: rank == PopCompanionRank::Back ? facing + PI
+		: facing + side * PI / 2;
+	const int base_dist = rank == PopCompanionRank::Back ? 3 : 2;
+
+	for (int attempt = 0; attempt < 16; attempt++) {
+		// The first tries stay near the rank's place, later ones go all the way round.
+		const double spread = attempt < 8 ? PI / 3.5 : PI;
+		const double angle = base_angle + (static_cast<double>(rnd_value(-1000, 1000)) / 1000.0) * spread;
+		const int dist = base_dist + rnd_value(0, 1);
+		const int16 x = static_cast<int16>(owner->x + std::lround(std::cos(angle) * dist));
+		const int16 y = static_cast<int16>(owner->y + std::lround(std::sin(angle) * dist));
+		if ((x == owner->x && y == owner->y) || !map_getcell(owner->m, x, y, CELL_CHKPASS))
+			continue;
+		PopCompanionSpotCtx ctx{ sd, sd->pop.companion_owner, x, y, false };
+		map_foreachinrange(pop_companion_spot_taken_cb, owner, POP_COMPANION_SPOT_RANGE, BL_PC, &ctx);
+		if (ctx.taken)
+			continue;
+		if (!path_search_long(nullptr, owner->m, owner->x, owner->y, x, y, CELL_CHKWALL)
+			|| !path_search(nullptr, sd->m, sd->x, sd->y, x, y, 0, CELL_CHKNOPASS))
+			continue;
+		out_x = x;
+		out_y = y;
+		return true;
+	}
+	return false;
+}
+
 static void population_shell_companion_follow(map_session_data *sd, map_session_data *owner, t_tick now)
 {
 	s_population &pe = sd->pop;
-	if (pe.target_id != 0 || sd->ud.skilltimer != INVALID_TIMER)
+	if (pe.target_id != 0 || sd->ud.skilltimer != INVALID_TIMER) {
+		pe.companion_spot_x = pe.companion_spot_y = -1; // after the fight it finds its place again
 		return;
-	if (distance_bl(sd, owner) <= POP_COMPANION_FOLLOW_CELLS)
+	}
+
+	// The owner moved: the old spot is gone, and it takes a moment to notice.
+	if (owner->x != pe.companion_seen_x || owner->y != pe.companion_seen_y) {
+		pe.companion_seen_x = owner->x;
+		pe.companion_seen_y = owner->y;
+		pe.companion_spot_x = pe.companion_spot_y = -1;
+		if (pe.companion_react_at == 0)
+			pe.companion_react_at = now + rnd_value(POP_COMPANION_REACT_MIN_MS, POP_COMPANION_REACT_MAX_MS);
+	}
+	if (pe.companion_react_at != 0) {
+		if (DIFF_TICK(now, pe.companion_react_at) < 0)
+			return;
+		pe.companion_react_at = 0;
+	}
+
+	const int dist = distance_bl(sd, owner);
+	if (unit_is_walking(owner)) {
+		// Trail at its own distance, so a line of companions does not walk in one cell.
+		const int trail = POP_COMPANION_FOLLOW_CELLS - 1 + static_cast<int>(sd->id % 3);
+		if (dist <= trail + 1 || (unit_is_walking(sd) && sd->ud.target_to == owner->id))
+			return; // unit_walktobl keeps chasing a moving owner
+		// Combat owner: it may preempt a roam left over from before the shell joined
+		if (!population_shell_can_emit_movement(sd, MovementOwner::Combat, "population_shell:companion_follow"))
+			return;
+		if (unit_walktobl(sd, owner, trail, 0))
+			pe.last_move = now;
+		else
+			pe.movement_emitted_this_tick = false; // pop_companions_maintain warps it when this goes on
 		return;
+	}
+
 	if (unit_is_walking(sd) && sd->ud.target_to == owner->id)
-		return; // unit_walktobl keeps chasing a moving owner
-	// Combat owner: it may preempt a roam left over from before the shell joined
-	if (!population_shell_can_emit_movement(sd, MovementOwner::Combat, "population_shell:companion_follow"))
+		unit_stop_walking(sd, USW_NONE); // the owner stopped: head for a spot instead of their back
+	if (pe.companion_spot_x >= 0 && DIFF_TICK(now, pe.companion_next_shuffle) >= 0) {
+		pe.companion_next_shuffle = now + rnd_value(POP_COMPANION_SHUFFLE_MIN_MS, POP_COMPANION_SHUFFLE_MAX_MS);
+		if (!unit_is_walking(sd) && rnd_value(0, 2) == 0)
+			pe.companion_spot_x = pe.companion_spot_y = -1;
+	}
+	if (pe.companion_spot_x < 0) {
+		int16 x, y;
+		if (pop_companion_pick_spot(sd, owner, x, y)) {
+			pe.companion_spot_x = x;
+			pe.companion_spot_y = y;
+			pe.companion_next_shuffle = now + rnd_value(POP_COMPANION_SHUFFLE_MIN_MS, POP_COMPANION_SHUFFLE_MAX_MS);
+		} else if (dist > POP_COMPANION_FOLLOW_CELLS) {
+			// Nowhere free (a narrow corridor): just close in, as before.
+			if (population_shell_can_emit_movement(sd, MovementOwner::Combat, "population_shell:companion_follow")) {
+				if (unit_walktobl(sd, owner, POP_COMPANION_FOLLOW_CELLS - 1, 0))
+					pe.last_move = now;
+				else
+					pe.movement_emitted_this_tick = false;
+			}
+			return;
+		} else
+			return;
+	}
+
+	if (sd->x == pe.companion_spot_x && sd->y == pe.companion_spot_y)
 		return;
-	if (unit_walktobl(sd, owner, POP_COMPANION_FOLLOW_CELLS - 1, 0))
+	if (unit_is_walking(sd) && sd->ud.to_x == pe.companion_spot_x && sd->ud.to_y == pe.companion_spot_y)
+		return;
+	if (!population_shell_can_emit_movement(sd, MovementOwner::Combat, "population_shell:companion_spot"))
+		return;
+	if (unit_walktoxy(sd, pe.companion_spot_x, pe.companion_spot_y, 4))
 		pe.last_move = now;
-	else
-		pe.movement_emitted_this_tick = false; // pop_companions_maintain warps it when this goes on
+	else {
+		pe.movement_emitted_this_tick = false;
+		pe.companion_spot_x = pe.companion_spot_y = -1; // another one next tick
+	}
 }
 } // namespace
 

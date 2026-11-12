@@ -179,6 +179,12 @@ struct s_population {
 	uint32 companion_owner = 0;     ///< Shell: char id of the player whose party it joined (0 = plain shell).
 	int32  companion_pending = 0;   ///< Player: id of the shell waiting for this player's new party (0 = none).
 	t_tick companion_next_scan = 0; ///< Shell: when to look for mobs around the owner again.
+	int16  companion_spot_x = -1;   ///< Shell: the cell it stands on next to its idle owner (-1 = none picked).
+	int16  companion_spot_y = -1;
+	int16  companion_seen_x = -1;   ///< Shell: where it last saw its owner; a change means the owner moved.
+	int16  companion_seen_y = -1;
+	t_tick companion_react_at = 0;  ///< Shell: when it reacts to the owner's move (0 = nothing to react to).
+	t_tick companion_next_shuffle = 0; ///< Shell: when it may take a step while its owner stands still.
 
 	// --- Skill fail tracking ---
 	t_tick last_skill_fail    = 0;  ///< Tick of last failed skill use.
