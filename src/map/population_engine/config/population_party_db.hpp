@@ -32,9 +32,11 @@ struct PopPartySlot {
 	PopPartyDuty duty = PopPartyDuty::Roamer;
 	std::vector<std::pair<uint16_t, uint16_t>> jobs; ///< job id, weight
 	uint16_t partner_job = 0;       ///< performer: the other half of the duo, on the next cell (0: alone)
-	std::string skill_set;          ///< population_skill_db.yml Name: (empty: its build's or job's)
-	std::string partner_skill_set;
-	std::string build;              ///< population_personality.yml Build: the member takes (empty: rolled)
+	/// population_skill_db.yml Name:s; a member takes the one written for its class (none: its build's or job's)
+	std::vector<std::string> skill_sets;
+	std::vector<std::string> partner_skill_sets;
+	/// population_personality.yml Build:s; a member takes the first that is for its class (none: rolled)
+	std::vector<std::string> builds;
 	int32_t count_min = 1, count_max = 1;
 	int32_t chance = 100;           ///< % of parties that have the slot
 	// roamer
@@ -64,6 +66,7 @@ struct PopPartyMap {
 	std::string map;
 	std::vector<std::pair<std::string, int32_t>> parties; ///< template name, how many
 	std::vector<std::pair<int16_t, int16_t>> camps;       ///< camp spots, in order; the rest are picked
+	int32_t level_lo = 0, level_hi = 0;                   ///< its parties' base levels (0: below its monsters)
 	std::array<int16_t, static_cast<size_t>(PopPartyDuty::Count)> chance; ///< % per duty, -1: the slot's
 
 	PopPartyMap() { chance.fill(-1); }
@@ -75,6 +78,7 @@ class PopulationPartyDatabase : public YamlDatabase {
 
 	bool readRange(const ryml::NodeRef& node, const char* key, int32_t& lo, int32_t& hi);
 	bool readJobs(const ryml::NodeRef& node, const std::string& owner, std::vector<std::pair<uint16_t, uint16_t>>& out);
+	bool readNames(const ryml::NodeRef& node, const char* key, std::vector<std::string>& out);
 	bool readSlot(const ryml::NodeRef& node, const std::string& party, PopPartySlot& slot);
 
 public:

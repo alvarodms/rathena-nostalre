@@ -92,10 +92,11 @@ files we do not use. Our changes carry a `nostalRE` comment:
 - `population_engine_max_count` 300.
 - `population_engine_map_levels` (on): autosummoned shells take their level from
   the mean level of their map's permanent monsters, with a floor by class (a
-  Knight is at least 45); towns and maps with no monsters use 30-85. A class
+  Knight is at least 55, as players change job late; `core/population_levels.hpp`,
+  tested in `src/test/`); towns and maps with no monsters use 30-85. A class
   whose floor is clearly above the map steps down (Knight to Swordsman to
-  Novice); a first class on a map with monsters from level 40 may step up to a
-  second class, and from level 60 always does (Swordsman to Knight or Crusader).
+  Novice); a first class on a map with monsters from level 50 may step up to a
+  second class, and from level 70 always does (Swordsman to Knight or Crusader).
   Either way it still counts as its spawn-table job. Stats are fitted to what the
   level has in `db/re/statpoint.yml`, gear to what it can wear; a shell below its
   whole weapon pool gets the plainest weapon of that kind its job can wear.
@@ -133,7 +134,8 @@ files we do not use. Our changes carry a `nostalRE` comment:
   someone else fights: one after another player or shell, one a nearby player hit,
   or one another shell went for first; one after them or their party they fight.
 - Shell parties (`db/population_party.yml`, `population_engine_parties`, on): on
-  the maps the file lists (Veins Field 03, Geffen Field 06, Sograt Desert 17)
+  the maps the file lists (Payon Fields 08 and 09, Geffen Fields 06 and 10, the
+  Orc Dungeon's first floor, Veins Field 03, Sograt Desert 17)
   some shells play as a party. A party is a tactic and its slots, each slot a
   duty; the one tactic so far is `camp`: the leader (`anchor`) stands on a camp
   spot, half of them with a recruiting chat room; a `support` by them heals,
@@ -150,9 +152,15 @@ files we do not use. Our changes carry a `nostalRE` comment:
   of the map's warps) and how likely the optional slots are there. A party takes
   its members out of the map's shells: as the map fills, the spawner gives its
   next shell to a party with a free place, in the place's class, and the quota
-  counts it as the job it was going to be. Classes fit the map's level: on a map
-  too low for a class the slot gets the class below, and a performer, a battery
-  or a support who would be a Novice is left out. A party is its own party id on
+  counts it as the job it was going to be. A map's parties are a level range,
+  its entry's `Levels` or from 8 below its monsters to 7 above (Renewal gives
+  more EXP for monsters above you); each party takes a window of it 15 levels
+  wide at most, so it shares EXP, and each member a level in the window. A member
+  too low for its slot's class gets the class below (a second class from 55), so
+  where second classes start some parties have them; a performer, a battery or a
+  support who would be a Novice is left out. A slot's `SkillSet` and `Build` can
+  list several, each member taking the one for its class (`priest_camp` for a
+  Priest, `acolyte_camp` for an Acolyte). A party is its own party id on
   its members (in the fake range, so party skills and songs reach the party
   alone: `party_foreachsamemap` takes its members); it is not a real party. A
   player in no party asks to join by entering the leader's chat room or whispering
@@ -171,8 +179,8 @@ files we do not use. Our changes carry a `nostalRE` comment:
   A member killed in sight of a healer with Resurrection waits a minute for it;
   any other gets up on its cell at the camp after the party's `Respawn`, the
   same shell (a plain shell's respawn makes a new one). Two skill conditions for
-  it, `ally_dead`, `ally_sp_below` and `ally_sp_low`, and four skill sets (`priest_camp`,
-  `professor_battery`, `bard_camp`, `dancer_camp`). `@populate parties` lists the
+  it, `ally_dead`, `ally_sp_below` and `ally_sp_low`, and five skill sets (`priest_camp`,
+  `acolyte_camp`, `professor_battery`, `bard_camp`, `dancer_camp`). `@populate parties` lists the
   map's parties and what each member is doing. Files:
   `config/population_party_db.cpp`, `runtime/population_party.cpp`, and the
   "shell parties" section of `population_engine.cpp`.

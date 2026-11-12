@@ -54,6 +54,7 @@
 #include "population_engine/core/population_engine_core.hpp"
 #include "population_engine/runtime/population_engine_path.hpp"
 #include "population_engine/core/population_manners.hpp"
+#include "population_engine/core/population_levels.hpp"
 
 // Unity-build: all submodule translation units compiled via the factory.
 #include "population_engine/population_engine_factory.cpp"
@@ -336,38 +337,40 @@ static PopulationLevelBand population_map_level_band(int16_t map_id, uint8_t map
 	return { map_level - spread, map_level + spread, spread };
 }
 
-/// The base levels a class can have: a Knight needs a first job behind them, so not
-/// below 45; first classes stop at 70, Novices at 15.
+/// The base levels a class can have (pop_levels::class_levels): a Knight is at least 55, as players change
+/// job late; first classes stop at 70, Novices at 15.
+static pop_levels::Tier population_class_tier(uint16_t job_id)
+{
+	using pop_levels::Tier;
+	const uint64 mapid = pc_jobid2mapid(job_id);
+	const uint64 base_class = mapid & MAPID_FIRSTMASK;
+	if (mapid & JOBL_THIRD)
+		return Tier::Third;
+	if (mapid & JOBL_2)
+		return (mapid & JOBL_UPPER) ? Tier::TransSecond : Tier::Second;
+	if (base_class == MAPID_NOVICE)
+		return Tier::Novice;
+	if (base_class == MAPID_GUNSLINGER || base_class == MAPID_NINJA)
+		return Tier::FirstOnly; // no second class to move on to
+	return Tier::First;
+}
+
 static void population_class_level_range(uint16_t job_id, int32_t& floor_level, int32_t& cap)
 {
-	const uint64 mapid = pc_jobid2mapid(job_id);
-	const int32_t max_base = static_cast<int32_t>(job_db.get_maxBaseLv(job_id));
-	const uint64 base_class = mapid & MAPID_FIRSTMASK;
-
-	if (mapid & JOBL_THIRD) {
-		floor_level = 99; cap = max_base;
-	} else if (mapid & JOBL_2) {
-		floor_level = (mapid & JOBL_UPPER) ? 60 : 45; cap = max_base;
-	} else if (base_class == MAPID_NOVICE) {
-		floor_level = 1; cap = 15;
-	} else if (base_class == MAPID_GUNSLINGER || base_class == MAPID_NINJA) {
-		floor_level = 10; cap = max_base; // no second class to move on to
-	} else {
-		floor_level = 10; cap = 70;
-	}
-	cap = std::min(cap, max_base);
-	floor_level = std::min(floor_level, cap);
+	const pop_levels::Range range = pop_levels::class_levels(population_class_tier(job_id));
+	cap = std::min(range.hi, static_cast<int32_t>(job_db.get_maxBaseLv(job_id)));
+	floor_level = std::min(range.lo, cap);
 }
 
 /// A first class on a map players hunt on after their job change moves up to one of its
 /// second classes (Swordsman to Knight or Crusader), so Glast Heim holds no level 70
-/// Mages. Monsters below level 40 keep every first class, from 60 up none; in between the
-/// chance grows with the map. Towns keep theirs. A second class with no entry in
+/// Mages. Monsters below level 50 keep every first class, from 70 up none; in between the
+/// chance grows with the map (second classes start at 55). Towns keep theirs. A second class with no entry in
 /// db/population_engine.yml (no gear, no skills) is not picked. Novices, Gunslingers and
 /// Ninjas stay: their second class is not a step players take mid-levels.
 static uint16_t population_promote_job_for_map(uint16_t job_id, int16_t map_id, uint8_t map_category)
 {
-	static constexpr int32_t PROMOTE_FROM = 40, PROMOTE_ALL = 60;
+	static constexpr int32_t PROMOTE_FROM = 50, PROMOTE_ALL = 70;
 	const uint64 mapid = pc_jobid2mapid(job_id);
 	const uint64 base_class = mapid & MAPID_FIRSTMASK;
 	if ((mapid & (JOBL_2 | JOBL_THIRD | JOBL_FOURTH)) != 0 || base_class == MAPID_NOVICE
@@ -395,7 +398,7 @@ static uint16_t population_promote_job_for_map(uint16_t job_id, int16_t map_id, 
 }
 
 /// The job a shell takes on this map: a class that cannot be this low steps down, so a
-/// Poring field holds Novices and new first classes instead of level 45 Knights. A second
+/// Poring field holds Novices and new first classes instead of level 55 Knights. A second
 /// or third class becomes its first class (Knight to Swordsman, Super Novice to Novice),
 /// and a first class becomes a Novice. A few levels of slack keep the step for maps
 /// clearly too low. A first class on a high map steps up (population_promote_job_for_map).
@@ -409,21 +412,24 @@ static uint16_t population_fit_job_to_map(uint16_t job_id, int16_t map_id, uint8
 	return population_step_down_job_for_map(job_id, map_id, map_category);
 }
 
-/// The stepping down alone, which is all a party's slots take: they name the class they want, and a map too
-/// low for it gets the class below (pop_party_roll_plan).
-static uint16_t population_step_down_job_for_map(uint16_t job_id, int16_t map_id, uint8_t map_category)
+/// The class a shell of at most `level` can be: one whose floor is above it steps down, a transcendent second
+/// class to its second class (High Priest to Priest), a second or third class to its first class (Knight to
+/// Swordsman, Super Novice to Novice), a first class to a Novice.
+static uint16_t population_step_down_job(uint16_t job_id, int32_t level)
 {
-	static constexpr int32_t FLOOR_SLACK = 5;
-	const PopulationLevelBand band = population_map_level_band(map_id, map_category);
 	uint16_t job = job_id;
-	for (int32_t step = 0; step < 3; step++) {
+	for (int32_t step = 0; step < 4; step++) {
 		int32_t floor_level, cap;
 		population_class_level_range(job, floor_level, cap);
-		if (floor_level <= band.hi + FLOOR_SLACK)
+		if (floor_level <= level)
 			break;
 		const uint64 mapid = pc_jobid2mapid(job);
-		const uint64 lower = (mapid & (JOBL_2 | JOBL_THIRD | JOBL_FOURTH)) ? (mapid & MAPID_FIRSTMASK) : MAPID_NOVICE;
-		const int32 lower_job = pc_mapid2jobid(lower, SEX_MALE);
+		const uint64 lower = (mapid & (JOBL_THIRD | JOBL_FOURTH)) ? (mapid & MAPID_FIRSTMASK)
+			: (mapid & JOBL_2) && (mapid & JOBL_UPPER) ? (mapid & ~static_cast<uint64>(JOBL_UPPER))
+			: (mapid & JOBL_2) ? (mapid & MAPID_FIRSTMASK) : MAPID_NOVICE;
+		// a Gypsy steps down to a Dancer
+		const int32 sex = pc_mapid2jobid(mapid, SEX_MALE) != job ? SEX_FEMALE : SEX_MALE;
+		const int32 lower_job = pc_mapid2jobid(lower, sex);
 		if (lower_job < 0 || lower_job == job)
 			break;
 		job = static_cast<uint16_t>(lower_job);
@@ -431,20 +437,34 @@ static uint16_t population_step_down_job_for_map(uint16_t job_id, int16_t map_id
 	return job;
 }
 
+/// The stepping down for a map: a few levels of slack over its band keep it for maps clearly too low.
+static uint16_t population_step_down_job_for_map(uint16_t job_id, int16_t map_id, uint8_t map_category)
+{
+	static constexpr int32_t FLOOR_SLACK = 5;
+	return population_step_down_job(job_id, population_map_level_band(map_id, map_category).hi + FLOOR_SLACK);
+}
+
 /// Roll a shell's base and job level for a map: around the map's band, within what the
 /// class allows (population_fit_job_to_map has already made the class fit).
-static void population_roll_map_levels(uint16_t job_id, int16_t map_id, uint8_t map_category, int16_t& base_level, int16_t& job_level)
+/// `party_level`: the level a party's place says (pop_party_roll_plan), kept within what the class allows.
+static void population_roll_map_levels(uint16_t job_id, int16_t map_id, uint8_t map_category, int16_t& base_level, int16_t& job_level,
+	int32_t party_level = 0)
 {
 	const int32_t max_job = std::max(1, static_cast<int32_t>(job_db.get_maxJobLv(job_id)));
 	int32_t floor_level, cap;
 	population_class_level_range(job_id, floor_level, cap);
 
-	const PopulationLevelBand band = population_map_level_band(map_id, map_category);
-	const int32_t hi = std::min(std::max(band.hi, floor_level + band.spread), cap);
-	const int32_t lo = std::max(std::min(band.lo, hi - band.spread), floor_level);
-	const int32_t base = std::max<int32_t>(population_roll_closed_range(static_cast<int16_t>(lo), static_cast<int16_t>(hi)), 1);
+	int32_t base;
+	if (party_level > 0) {
+		base = std::clamp(party_level, floor_level, std::max(floor_level, cap));
+	} else {
+		const PopulationLevelBand band = population_map_level_band(map_id, map_category);
+		const int32_t hi = std::min(std::max(band.hi, floor_level + band.spread), cap);
+		const int32_t lo = std::max(std::min(band.lo, hi - band.spread), floor_level);
+		base = std::max<int32_t>(population_roll_closed_range(static_cast<int16_t>(lo), static_cast<int16_t>(hi)), 1);
+	}
 
-	// Job levels come fast early on, hence the root: a level 60 Knight (range 45-99) is about job 26.
+	// Job levels come fast early on, hence the root: a level 70 Knight (range 55-99) is about job 29.
 	const double progress = cap > floor_level ? static_cast<double>(base - floor_level) / (cap - floor_level) : 1.0;
 	const int32_t jitter = max_job / 10;
 	const int32_t job = 1 + static_cast<int32_t>(std::sqrt(progress) * (max_job - 1))
@@ -1437,7 +1457,7 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 		// nostalRE: the level comes first, since it decides what the shell can wear.
 		int16_t map_base_level = -1, map_job_level = -1;
 		if (battle_config.population_engine_map_levels)
-			population_roll_map_levels(job_id, map_id, map_category, map_base_level, map_job_level);
+			population_roll_map_levels(job_id, map_id, map_category, map_base_level, map_job_level, party != nullptr ? party->level : 0);
 
 		// Pick one item randomly from each equipment pool (empty pool = no item in that slot).
 		auto pick_pool = [map_base_level](const std::vector<uint16_t>& p) -> uint16_t {
@@ -1678,42 +1698,74 @@ static int32_t pop_density_scaled(int32_t v) {
 // (pop_party_claim), and the quota still counts it as the job it was going to be.
 // Switch: population_engine_parties.
 
-/// "LF> party {map} {level}+": the map's name and its monsters' level, rounded down to a five.
-static std::string pop_party_title(const std::string& templ, int16 m)
+/// The levels a map's parties are: its entry's Levels, or below its monsters (pop_levels::party_default).
+static pop_levels::Range pop_party_levels(const PopPartyMap& pm, int16 m)
+{
+	if (pm.level_hi > 0)
+		return { pm.level_lo, pm.level_hi };
+	const int32_t map_level = population_map_mob_level(m);
+	if (map_level > 0)
+		return pop_levels::party_default(map_level);
+	const PopulationLevelBand band = population_map_level_band(m, 2);
+	return { band.lo, band.hi };
+}
+
+/// "LF> party {map} {level}+": the map's name and the party's lowest level, rounded down to a five.
+static std::string pop_party_title(const std::string& templ, int16 m, int32_t level)
 {
 	std::string title = templ;
 	const struct map_data* mapdata = map_getmapdata(m);
-	const int32_t level = population_map_mob_level(m);
 	population_engine_chat_replace_all(title, "{map}", mapdata != nullptr ? mapdata->name : "");
-	population_engine_chat_replace_all(title, "{level}", std::to_string(level - level % 5));
+	population_engine_chat_replace_all(title, "{level}", std::to_string(level >= 5 ? level - level % 5 : level));
 	if (title.size() >= CHATROOM_TITLE_SIZE)
 		title.resize(CHATROOM_TITLE_SIZE - 1);
 	return title;
 }
 
-/// Who a new party is made of: each slot rolled (is it there, how many, which job), the jobs fitted to the
-/// map's level. A map too low for a class gets the class below it (Priest to Acolyte, Knight to Swordsman),
-/// and a slot whose duty needs the class itself is left out: no songs without a Bard, no Soul Exchange
-/// without a Professor, no support from a Novice.
+/// Who a new party is made of: each slot rolled (is it there, how many, which job), each member a level in
+/// the party's window (g.level_lo-hi) and the class it can be at that level. A member too low for its class
+/// gets the class below it (Priest to Acolyte, Knight to Swordsman), so on a map where second classes start
+/// a party has some, and a slot whose duty needs the class itself is left out: no songs without a Bard, no
+/// Soul Exchange without a Professor, no support from a Novice.
 static void pop_party_roll_plan(PopPartyGroup& g, const PopPartyMap& pm)
 {
 	const PopPartyTemplate& tpl = *g.tpl;
-	const auto add = [&g](const PopPartySlot& slot, size_t slot_index, uint16_t job, const std::string& skill_set, bool keep_class) -> int {
+	const bool map_levels = battle_config.population_engine_map_levels != 0;
+	// `roll`: the member's level in the window, -1: rolled (a performer's partner takes the performer's)
+	const auto add = [&g, map_levels](const PopPartySlot& slot, size_t slot_index, uint16_t job, const std::vector<std::string>& skill_sets,
+			bool keep_class, int32_t roll = -1) -> int {
 		if (g.members.size() >= MAX_PARTY)
 			return -1;
-		const uint16_t fitted = battle_config.population_engine_map_levels ? population_step_down_job_for_map(job, g.m, 2) : job;
+		const pop_levels::Range window = { g.level_lo, g.level_hi };
+		if (roll < 0)
+			roll = static_cast<int32_t>(rnd() % static_cast<uint32_t>(std::max(1, window.hi - window.lo + 1)));
+		const uint16_t fitted = map_levels ? population_step_down_job(job, window.lo + roll) : job;
 		if (fitted != job && keep_class)
 			return -1;
 		PopPartyMember member;
 		member.duty = slot.duty;
 		member.slot = static_cast<uint8_t>(slot_index);
 		member.job = fitted;
+		if (map_levels) {
+			int32_t floor_level, cap;
+			population_class_level_range(fitted, floor_level, cap);
+			member.level = pop_levels::member_level(window, roll, { floor_level, cap });
+		}
 		// a skill set is for the class it was written for (and its transcendent): a slot of Priests and
-		// Knights can name the Priests'. The build is checked against the job at spawn.
-		const uint16_t set_job = skill_set.empty() ? 0 : population_skill_db().set_job(skill_set);
-		if (set_job != 0 && (pc_jobid2mapid(fitted) & MAPID_SECONDMASK) == (pc_jobid2mapid(set_job) & MAPID_SECONDMASK))
-			member.skill_set = skill_set;
-		member.build = slot.build;
+		// Acolytes names one of each, and each member takes its own
+		for (const std::string& set : skill_sets) {
+			const uint16_t set_job = population_skill_db().set_job(set);
+			if (set_job != 0 && (pc_jobid2mapid(fitted) & MAPID_SECONDMASK) == (pc_jobid2mapid(set_job) & MAPID_SECONDMASK)) {
+				member.skill_set = set;
+				break;
+			}
+		}
+		for (const std::string& build : slot.builds) {
+			if (population_personality_db().find_build(build, fitted) != nullptr) {
+				member.build = build;
+				break;
+			}
+		}
 		g.members.push_back(member);
 		return static_cast<int>(g.members.size()) - 1;
 	};
@@ -1740,7 +1792,7 @@ static void pop_party_roll_plan(PopPartyGroup& g, const PopPartyMap& pm)
 				const uint16_t* job = pop_pick_weighted(slot.jobs);
 				if (job == nullptr)
 					break;
-				const int index = add(slot, i, *job, slot.skill_set, duty == PopPartyDuty::Performer || duty == PopPartyDuty::Battery);
+				const int index = add(slot, i, *job, slot.skill_sets, duty == PopPartyDuty::Performer || duty == PopPartyDuty::Battery);
 				if (index < 0)
 					continue;
 				if (duty == PopPartyDuty::Support && !pop_party_job_heals(g.members[index].job)) {
@@ -1748,7 +1800,8 @@ static void pop_party_roll_plan(PopPartyGroup& g, const PopPartyMap& pm)
 					continue;
 				}
 				if (duty == PopPartyDuty::Performer && slot.partner_job != 0) {
-					const int partner = add(slot, i, slot.partner_job, slot.partner_skill_set, true);
+					const int partner = add(slot, i, slot.partner_job, slot.partner_skill_sets, true,
+						map_levels ? std::max(0, g.members[index].level - g.level_lo) : -1);
 					if (partner < 0) {
 						g.members.pop_back();
 						continue;
@@ -1806,8 +1859,13 @@ static void pop_parties_maintain()
 				}
 				if (!placed && !pop_party_pick_camp(mid, g.camp_x, g.camp_y))
 					break; // no room on the map now; tried again next time
+				const pop_levels::Range levels = pop_party_levels(*pm, mid);
+				const pop_levels::Range window = pop_levels::party_window(levels,
+					static_cast<int32_t>(rnd() % static_cast<uint32_t>(levels.hi - levels.lo + 1)));
+				g.level_lo = window.lo;
+				g.level_hi = window.hi;
 				if (!tpl->recruit.empty() && static_cast<int32_t>(rnd() % 100) < tpl->recruit_chance)
-					g.title = pop_party_title(tpl->recruit[rnd() % tpl->recruit.size()], mid);
+					g.title = pop_party_title(tpl->recruit[rnd() % tpl->recruit.size()], mid, g.level_lo);
 				g.id = ++g_pop_party_serial;
 				pop_party_roll_plan(g, *pm);
 				if (g.members.empty())
@@ -1836,6 +1894,7 @@ static bool pop_party_claim(int16 m, PopPartySpawn& out)
 			out.x = member.spot_x;
 			out.y = member.spot_y;
 			out.build = member.build;
+			out.level = member.level;
 			return true;
 		}
 	}

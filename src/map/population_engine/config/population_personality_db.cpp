@@ -230,7 +230,7 @@ uint64 PopulationPersonalityDatabase::parseBodyNode(const ryml::NodeRef& node)
 			this->invalidWarning(c, "Build '%s': job '%s' needs a weight -- using 1.\n", name.c_str(), job_name.c_str());
 			weight = 1;
 		}
-		if (weight > 0)
+		if (weight >= 0) // 0: never rolled, only taken by the party slots that name it
 			b->jobs.emplace_back(job_id, static_cast<uint16_t>(std::min(weight, 10000)));
 	}
 	if (b->jobs.empty()) {
@@ -323,6 +323,11 @@ void PopulationPersonalityDatabase::roll(uint16_t job_id, std::shared_ptr<const 
 			pool.emplace_back(t, t->weight);
 	if (const auto* picked = pop_pick_weighted(pool))
 		temperament = *picked;
+}
+
+bool PopulationPersonalityDatabase::has_build(const std::string& name) const
+{
+	return std::any_of(this->builds_.begin(), this->builds_.end(), [&name](const std::shared_ptr<const PopBuild>& b) { return b->name == name; });
 }
 
 std::shared_ptr<const PopBuild> PopulationPersonalityDatabase::find_build(const std::string& name, uint16_t job_id) const

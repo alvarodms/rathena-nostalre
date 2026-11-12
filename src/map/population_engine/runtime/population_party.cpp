@@ -47,6 +47,7 @@ struct PopPartyMember {
 	uint16_t job = 0;        ///< fitted to the map's level
 	std::string skill_set;
 	std::string build;       ///< population_personality.yml build to take (empty: rolled)
+	int32_t level = 0;       ///< base level, in its party's window (0: no map levels, rolled as any shell)
 	int32 shell_id = 0;      ///< 0: not on the map yet
 	int16 spot_x = 0, spot_y = 0; ///< its cell at the camp (0: not picked yet)
 	int16 pair = -1;         ///< performer: the member it stands next to
@@ -58,6 +59,7 @@ struct PopPartyGroup {
 	uint32 id = 0;
 	int16 m = -1;
 	int16 camp_x = 0, camp_y = 0;
+	int32_t level_lo = 0, level_hi = 0; ///< its members' base levels, within party_share_level of each other
 	std::shared_ptr<const PopPartyTemplate> tpl;
 	std::vector<PopPartyMember> members;
 	std::string title;       ///< the leader's chat room (empty: none)
@@ -72,6 +74,7 @@ struct PopPartySpawn {
 	uint16_t job = 0;
 	int16 x = 0, y = 0;
 	std::string build;
+	int32_t level = 0;
 };
 
 static std::map<uint32, PopPartyGroup> g_pop_parties; // id -> party
@@ -1006,8 +1009,8 @@ void population_party_report(int fd, int16_t map_id)
 			if (pop_party_member_sd(g, member) != nullptr)
 				on_map++;
 		const map_session_data *leader = g.members.empty() ? nullptr : pop_party_member_sd(g, g.members.front());
-		safesnprintf(msg, sizeof(msg), "party %u %s camp %d,%d members %zu/%zu room '%s' leader %d joined %u party_id %d", g.id,
-			g.tpl->name.c_str(), g.camp_x, g.camp_y, on_map, g.members.size(), g.title.c_str(), leader != nullptr ? leader->id : 0,
+		safesnprintf(msg, sizeof(msg), "party %u %s camp %d,%d levels %d-%d members %zu/%zu room '%s' leader %d joined %u party_id %d", g.id,
+			g.tpl->name.c_str(), g.camp_x, g.camp_y, g.level_lo, g.level_hi, on_map, g.members.size(), g.title.c_str(), leader != nullptr ? leader->id : 0,
 			g.player_char_id, g.party_id);
 		clif_displaymessage(fd, msg);
 		if (const map_session_data *player = pop_party_player(g)) {

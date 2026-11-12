@@ -27,6 +27,8 @@
 #     Jobs:          { JobName: weight } -- the jobs it is for. A job with builds always takes
 #                    one of them, by weight; a job with none keeps its population_engine.yml
 #                    entry. Names as in population_engine.yml (Knight, HighPriest, "Lord Knight").
+#                    Weight 0: never rolled, only taken by a party slot that names it
+#                    (population_party.yml Build:).
 #     SkillSet:      A Name: in population_skill_db.yml. (Default: the job's own skills)
 #     GearSet:       A GearSetName: in population_gear_sets.yml. (Default: the job's gear)
 #     Stats:         { Str: [min, max], Agi: ..., Vit, Int, Dex, Luk } -- before the shell's level
@@ -113,6 +115,14 @@ Body:
   # Priests: most heal and buff from behind with a staff; some melee with a mace.
   - Build: priest_support
     Jobs: { Priest: 3, HighPriest: 3 }
+    MeleeWeight: 10
+    Prefers: { heal: 130, buff: 120 }
+
+  # An Acolyte healing and buffing a low-level camp's party (population_party.yml): weight 0,
+  # so only the camps' Acolytes take it and Acolytes on their own keep their own entry.
+  - Build: acolyte_support
+    Jobs: { Acolyte: 0 }
+    SkillSet: acolyte_camp
     MeleeWeight: 10
     Prefers: { heal: 130, buff: 120 }
 
