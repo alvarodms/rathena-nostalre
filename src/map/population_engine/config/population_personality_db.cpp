@@ -68,6 +68,31 @@ const T* pop_pick_weighted(const std::vector<std::pair<T, uint16_t>>& items)
 	return nullptr;
 }
 
+/// A job by its population_engine.yml name (Knight, HighPriest, "Lord Knight"), a Job_ constant or a number.
+/// Also used by population_party_db.cpp, later in the unity unit.
+bool population_job_id_by_name(const std::string& name, uint16_t& job_id)
+{
+	std::string nosp = name;
+	nosp.erase(std::remove(nosp.begin(), nosp.end(), ' '), nosp.end());
+	const auto it = kJobNameMap.find(nosp);
+	if (it != kJobNameMap.end()) {
+		job_id = it->second;
+		return true;
+	}
+	int64 constant = 0;
+	if (script_get_constant(nosp.c_str(), &constant) || script_get_constant(("Job_" + nosp).c_str(), &constant)) {
+		job_id = static_cast<uint16_t>(constant);
+		return job_db.exists(job_id);
+	}
+	char* end = nullptr;
+	const long v = std::strtol(nosp.c_str(), &end, 10);
+	if (end != nosp.c_str() && *end == '\0' && job_db.exists(static_cast<uint16_t>(v))) {
+		job_id = static_cast<uint16_t>(v);
+		return true;
+	}
+	return false;
+}
+
 } // namespace
 
 PopulationPersonalityDatabase& population_personality_db()
@@ -139,28 +164,9 @@ bool PopulationPersonalityDatabase::readPrefers(const ryml::NodeRef& node, PopKi
 	return true;
 }
 
-/// A job by its population_engine.yml name (Knight, HighPriest, "Lord Knight"), a Job_ constant or a number.
 bool PopulationPersonalityDatabase::readJobId(const std::string& name, uint16_t& job_id)
 {
-	std::string nosp = name;
-	nosp.erase(std::remove(nosp.begin(), nosp.end(), ' '), nosp.end());
-	const auto it = kJobNameMap.find(nosp);
-	if (it != kJobNameMap.end()) {
-		job_id = it->second;
-		return true;
-	}
-	int64 constant = 0;
-	if (script_get_constant(nosp.c_str(), &constant) || script_get_constant(("Job_" + nosp).c_str(), &constant)) {
-		job_id = static_cast<uint16_t>(constant);
-		return job_db.exists(job_id);
-	}
-	char* end = nullptr;
-	const long v = std::strtol(nosp.c_str(), &end, 10);
-	if (end != nosp.c_str() && *end == '\0' && job_db.exists(static_cast<uint16_t>(v))) {
-		job_id = static_cast<uint16_t>(v);
-		return true;
-	}
-	return false;
+	return population_job_id_by_name(name, job_id);
 }
 
 uint64 PopulationPersonalityDatabase::parseBodyNode(const ryml::NodeRef& node)
@@ -311,4 +317,15 @@ void PopulationPersonalityDatabase::roll(uint16_t job_id, std::shared_ptr<const 
 			pool.emplace_back(t, t->weight);
 	if (const auto* picked = pop_pick_weighted(pool))
 		temperament = *picked;
+}
+
+std::shared_ptr<const PopBuild> PopulationPersonalityDatabase::find_build(const std::string& name, uint16_t job_id) const
+{
+	const auto bit = this->builds_by_job_.find(job_id);
+	if (bit == this->builds_by_job_.end())
+		return nullptr;
+	for (const auto& entry : bit->second)
+		if (entry.first->name == name)
+			return entry.first;
+	return nullptr;
 }

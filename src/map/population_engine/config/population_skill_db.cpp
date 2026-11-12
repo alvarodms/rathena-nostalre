@@ -55,6 +55,8 @@ static const std::unordered_map<std::string, PopSkillCondition> s_cond_name_map 
 	{ "damaged_gt",           PopSkillCondition::DamagedGt          },
 	{ "skill_used",           PopSkillCondition::SkillUsed          },
 	{ "enemy_is_player",      PopSkillCondition::EnemyIsPlayer      }, // nostalRE
+	{ "ally_dead",            PopSkillCondition::AllyDead           }, // nostalRE
+	{ "ally_sp_below",        PopSkillCondition::AllySpBelow        }, // nostalRE
 };
 
 // ---------------------------------------------------------------------------
@@ -113,6 +115,7 @@ void PopulationSkillDatabase::clear()
 {
 	this->jobs_.clear();
 	this->sets_.clear();
+	this->set_jobs_.clear();
 }
 
 const std::string PopulationSkillDatabase::getDefaultLocation()
@@ -289,6 +292,7 @@ uint64 PopulationSkillDatabase::parseBodyNode(const ryml::NodeRef& node)
 		if (!set_name.empty()) {
 			const uint64 count = static_cast<uint64>(skills.size());
 			this->sets_[set_name] = std::move(skills);
+			this->set_jobs_[set_name] = job_id;
 			return count;
 		}
 	}
@@ -301,6 +305,12 @@ const std::vector<s_pop_skill_entry>* PopulationSkillDatabase::find_set(const st
 {
 	auto it = this->sets_.find(name);
 	return (it != this->sets_.end()) ? &it->second : nullptr;
+}
+
+uint16_t PopulationSkillDatabase::set_job(const std::string& name) const
+{
+	auto it = this->set_jobs_.find(name);
+	return (it != this->set_jobs_.end()) ? it->second : 0;
 }
 
 const std::vector<s_pop_skill_entry>* PopulationSkillDatabase::find(uint16_t job_id) const

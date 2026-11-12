@@ -60,6 +60,7 @@ ACMD_FUNC(populate)
 		clif_displaymessage(fd, "  @populate timing | timingreset  (wander tick profiler)");
 		clif_displaymessage(fd, "  @populate levels  (level, stats and gear of the shells on this map)");
 		clif_displaymessage(fd, "  @populate vendors  (shops on this map: cell, NPC clearance, shift left)");
+		clif_displaymessage(fd, "  @populate parties  (shell parties on this map: camp, members, what each is doing)");
 		return -1;
 	}
 
@@ -100,6 +101,8 @@ ACMD_FUNC(populate)
 		population_engine_report_levels(fd, sd->m);
 	} else if (strcmpi(cmd, "vendors") == 0) {
 		population_engine_report_vendors(fd, sd->m);
+	} else if (strcmpi(cmd, "parties") == 0) {
+		population_engine_report_parties(fd, sd->m);
 	} else if (strcmpi(cmd, "status") == 0) {
 		if (population_engine_is_running())
 			clif_displaymessage(fd, "Population engine is RUNNING");

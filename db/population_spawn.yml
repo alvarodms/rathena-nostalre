@@ -116,7 +116,8 @@ Body:
       - pay_fild09
       - pay_fild10
       - pay_fild11
-    FieldsPopulation: 1000
+      - ve_fild03  # nostalRE: Magmarings, a party map (db/population_party.yml)
+    FieldsPopulation: 1027  # nostalRE: was 1000, +1 map keeps the per-map count
     Dungeons:
       - prt_maze01
       - prt_sewb1

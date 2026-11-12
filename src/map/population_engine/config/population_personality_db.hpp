@@ -70,6 +70,8 @@ public:
 
 	/// A build for this job (nullptr when it has none) and a temperament (nullptr when the file has none).
 	void roll(uint16_t job_id, std::shared_ptr<const PopBuild>& build, std::shared_ptr<const PopTemperament>& temperament) const;
+	/// The build of that name when it is one for this job, else nullptr.
+	std::shared_ptr<const PopBuild> find_build(const std::string& name, uint16_t job_id) const;
 	size_t build_count() const { return builds_.size(); }
 	size_t temperament_count() const { return temperaments_.size(); }
 };

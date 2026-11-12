@@ -123,6 +123,39 @@ files we do not use. Our changes carry a `nostalRE` comment:
   entries may say what they are for with `Kind:`. The conditions still decide
   what can be cast. A caster waits out its delay instead of meleeing. Off: the
   old rotation, with `population_engine_shell_basic_attack_chance`.
+- Shell parties (`db/population_party.yml`, `population_engine_parties`, on): on
+  the maps the file lists (Veins Field 03, Geffen Field 06, Sograt Desert 17)
+  some shells play as a party. A party is a tactic and its slots, each slot a
+  duty; the one tactic so far is `camp`: the leader (`anchor`) stands on a camp
+  spot, half of them with a recruiting chat room; a `support` by them heals,
+  buffs and raises the party's members and nobody else; `roamer`s hunt within
+  `Roam` cells of the camp and walk back when they are hurt, out of SP, out of
+  Blessing and Increase Agility or out long enough, wait there to be topped up
+  and leave again; a `performer` Bard with a Dancer on the next cell keeps songs
+  and ensembles up; a `battery` Professor gives SP with Soul Exchange and turns
+  its own HP into SP, which the support heals back. Members at the camp fight
+  only what attacks the camp, and those with nothing to cast sit down.
+  A map entry says how many parties the map holds (scaled by
+  `population_engine_density_pct`), where they camp (`Camps`, else a spot by one
+  of the map's warps) and how likely the optional slots are there. A party takes
+  its members out of the map's shells: as the map fills, the spawner gives its
+  next shell to a party with a free place, in the place's class, and the quota
+  counts it as the job it was going to be. Classes fit the map's level: on a map
+  too low for a class the slot gets the class below, and a performer, a battery
+  or a support who would be a Novice is left out. A party is its own party id on
+  its members (in the fake range, so party skills and songs reach the party
+  alone); it is not a real party and players cannot join one yet (a player who
+  enters the leader's chat room is told it is full; a member invited to a
+  player's party says it is in one). Members tick on any map a player is on,
+  seen or not, or the roamers would never come back; they do not take portals.
+  A member killed in sight of a healer with Resurrection waits a minute for it;
+  any other gets up on its cell at the camp after the party's `Respawn`, the
+  same shell (a plain shell's respawn makes a new one). Two skill conditions for
+  it, `ally_dead` and `ally_sp_below`, and four skill sets (`priest_camp`,
+  `professor_battery`, `bard_camp`, `dancer_camp`). `@populate parties` lists the
+  map's parties and what each member is doing. Files:
+  `config/population_party_db.cpp`, `runtime/population_party.cpp`, and the
+  "shell parties" section of `population_engine.cpp`.
 - Sages, Professors and Sorcerers cast Dispell only on players: a new skill
   condition, `enemy_is_player`, keeps it for PvP and the arena. Against monsters
   it was mostly wasted SP, and it could even thaw a monster someone had frozen.

@@ -52,6 +52,8 @@ enum class PopSkillCondition : uint8_t {
 	DamagedGt           = 33, ///< Shell received a single hit larger than (cond_value_num % of max HP). E.g. CondValue:10 triggers when hit by >10% max HP in one blow.
 	SkillUsed           = 34, ///< A specific skill (cond_value_str) was used against this shell within the last 3 seconds. Mirrors mob_skill_db `skillused`. cond_sc_resolved holds resolved skill ID.
 	EnemyIsPlayer       = 35, ///< nostalRE: target is a player (BL_PC), so a skill like Dispell is kept for PvP.
+	AllyDead            = 36, ///< nostalRE: a dead ally lies in skill range (Resurrection).
+	AllySpBelow         = 37, ///< nostalRE: an ally in skill range has SP% < cond_value_num and less SP than half the shell's (Soul Exchange).
 };
 
 /// nostalRE: what a skill is for, which the scored picker (population_engine_scored_skills) weighs by.
