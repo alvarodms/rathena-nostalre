@@ -1854,16 +1854,16 @@ void population_engine_report_parties(int fd, int16_t map_id)
 	population_party_report(fd, map_id);
 }
 
-/// A player walked into a party leader's chat room. Until players can join a shell party the leader says so.
+static void pop_party_on_join_request(map_session_data& player, map_session_data& member, bool by_whisper); // party companions
+
+/// A player walked into a party leader's chat room: they ask to join.
 void population_engine_on_chat_join(map_session_data& sd, int32_t owner_id)
 {
 	map_session_data* leader = map_id2sd(owner_id);
 	if (leader == nullptr || !population_engine_is_population_pc(leader->id) || leader->pop.party_group == 0
 		|| population_engine_is_population_pc(sd.id))
 		return;
-	char line[CHAT_SIZE_MAX + NAME_LENGTH * 2];
-	safesnprintf(line, sizeof(line), "%s : Sorry, we're full right now!", leader->status.name);
-	clif_GlobalMessage(*leader, line, CHAT_WOS);
+	pop_party_on_join_request(sd, *leader, false);
 }
 
 TIMER_FUNC(population_engine_autosummon_timer)
@@ -2118,6 +2118,7 @@ TIMER_FUNC(population_engine_global_combat_timer)
 		return 0;
 
 	pop_companions_maintain(); // nostalRE: before the tick below, which only reaches shells near a player
+	population_party_check_joins(); // nostalRE: a player gone from the shell party they joined
 
 	// Proximity-driven tick: each real PC scans its viewport for bots.
 	// No round-robin / budget needed — work is bounded by real-player count.
@@ -4603,6 +4604,93 @@ static void pop_companion_whisper(map_session_data &to, map_session_data &shell,
 		clif_wis_message(&to, shell.status.name, message, strlen(message) + 1, pc_get_group_level(&shell));
 }
 
+/// A shell party's leader, when it is on the map: the one who greets a player who joins.
+static map_session_data *pop_party_leader_sd(const PopPartyGroup &g)
+{
+	for (const PopPartyMember &member : g.members)
+		if (member.duty == PopPartyDuty::Anchor)
+			return pop_party_member_sd(g, member);
+	return nullptr;
+}
+
+/// `speaker` answers a player who asked to join: in a whisper, or aloud from the chat room.
+static void pop_party_answer(map_session_data &player, map_session_data &speaker, const char *message, bool by_whisper)
+{
+	if (by_whisper) {
+		pop_companion_whisper(player, speaker, message);
+		return;
+	}
+	char line[CHAT_SIZE_MAX + NAME_LENGTH * 2];
+	safesnprintf(line, sizeof(line), "%s : %s", speaker.status.name, message);
+	clif_GlobalMessage(speaker, line, CHAT_WOS);
+}
+
+/// A player asked `member`'s shell party to take them (its leader's chat room, or a whispered "party"). A player in
+/// no party gets one made for them, which the party joins once it exists (pop_party_join_ready), as companions do.
+static void pop_party_on_join_request(map_session_data &player, map_session_data &member, bool by_whisper)
+{
+	PopPartyGroup *g = pop_party_group(&member);
+	if (g == nullptr)
+		return;
+	const auto answer = [&](const char *message) { pop_party_answer(player, member, message, by_whisper); };
+	if (g->party_id != 0) {
+		if (g->party_id == player.status.party_id) {
+			answer("You're with us already!");
+			return;
+		}
+		const map_session_data *other = map_charid2sd(static_cast<int32>(g->player_char_id));
+		char message[CHAT_SIZE_MAX];
+		safesnprintf(message, sizeof(message), "Sorry, we're with %s now. Ask them for an invite!",
+			other != nullptr ? other->status.name : "someone");
+		answer(message);
+		return;
+	}
+	if (player.status.party_id != 0) {
+		answer("You're in a party already. Leave it, then come and join us!");
+		return;
+	}
+	if (player.party_creating || player.party_joining || player.pop.companion_pending != 0 || player.pop.party_join_pending != 0) {
+		answer("One moment, your party isn't ready yet.");
+		return;
+	}
+	if (player.m != g->m) {
+		answer("Come and find us first.");
+		return;
+	}
+	char name[NAME_LENGTH];
+	// char_name_letters holds for party names too: letters, digits and spaces
+	safesnprintf(name, sizeof(name), "%.17s Party", player.status.name);
+	player.pop.party_join_pending = g->id; // party_recv_info finishes this when the party exists
+	if (party_create(player, name, 0, 0) != 1) {
+		player.pop.party_join_pending = 0;
+		answer("We can't take you right now.");
+		return;
+	}
+	answer("Sure, join us!");
+}
+
+/// The party made for a player who asked to join a shell party exists: it takes the members in. It shares EXP
+/// evenly (party_exp_share_allowed still holds the members' levels to party_share_level).
+static void pop_party_join_ready(map_session_data &player)
+{
+	PopPartyGroup *g = pop_party_find(player.pop.party_join_pending);
+	player.pop.party_join_pending = 0;
+	party_data *p = party_search(player.status.party_id);
+	if (g == nullptr || p == nullptr)
+		return; // the camp is gone: the player keeps the party
+	map_session_data *leader = pop_party_leader_sd(*g);
+	if (g->party_id != 0 || player.m != g->m) {
+		if (leader != nullptr)
+			pop_companion_whisper(player, *leader, "Sorry, we can't take you now.");
+		return;
+	}
+	if (p->party.exp == 0)
+		party_changeoption(&player, 1, p->party.item);
+	population_party_join(*g, *p, player);
+	if (leader != nullptr)
+		pop_companion_whisper(player, *leader, "Welcome! Stay by the camp and we'll keep you going.");
+}
+
 static int32 pop_shell_fake_party_id(const map_session_data &shell)
 {
 	return static_cast<int32>(0x70000000u | static_cast<uint32>(static_cast<uint16>(shell.m)));
@@ -4630,6 +4718,11 @@ static bool pop_companion_map_is_closed(int16 m)
 bool population_engine_is_companion(const map_session_data *sd)
 {
 	return sd != nullptr && sd->pop.companion_owner != 0;
+}
+
+bool population_engine_shell_in_player_party(const map_session_data *sd)
+{
+	return population_engine_is_companion(sd) || population_party_joined(sd);
 }
 
 map_session_data *population_engine_companion_owner(const map_session_data *sd)
@@ -4694,8 +4787,10 @@ bool population_engine_companion_invite(map_session_data &owner, map_session_dat
 void population_engine_companion_dismiss(map_session_data &shell, bool expelled, const char *whisper)
 {
 	const auto it = g_pop_companions.find(shell.id);
-	if (it == g_pop_companions.end() && shell.pop.companion_owner == 0)
+	if (it == g_pop_companions.end() && shell.pop.companion_owner == 0) {
+		population_party_member_leaves(shell, expelled); // a shell party's member: back to its party's own id
 		return;
+	}
 	PopCompanion c = it != g_pop_companions.end() ? it->second
 		: PopCompanion{ shell.pop.companion_owner, shell.status.party_id, true, 0 };
 	if (it != g_pop_companions.end())
@@ -4747,7 +4842,9 @@ static std::vector<int32> pop_companions_where(Pred pred)
 void population_engine_companions_of_owner_leave(map_session_data &owner)
 {
 	owner.pop.companion_pending = 0;
+	owner.pop.party_join_pending = 0;
 	const uint32 char_id = owner.status.char_id;
+	population_party_unjoin_where(char_id, 0);
 	for (const int32 id : pop_companions_where([char_id](const PopCompanion &c) { return c.owner_char_id == char_id; })) {
 		if (map_session_data *shell = map_id2sd(id); shell != nullptr)
 			population_engine_companion_dismiss(*shell, false, nullptr);
@@ -4758,6 +4855,7 @@ void population_engine_companions_of_owner_leave(map_session_data &owner)
 
 void population_engine_companions_of_party_leave(int party_id)
 {
+	population_party_unjoin_where(0, party_id);
 	for (const int32 id : pop_companions_where([party_id](const PopCompanion &c) { return c.party_id == party_id; })) {
 		if (map_session_data *shell = map_id2sd(id); shell != nullptr)
 			population_engine_companion_dismiss(*shell, true, nullptr);
@@ -4769,7 +4867,7 @@ void population_engine_companions_of_party_leave(int party_id)
 void population_engine_companions_reattach(party_data &p)
 {
 	const int32 party_id = p.party.party_id;
-	bool any = false;
+	bool any = population_party_reattach(p); // a shell party the player joined: its members come first
 	for (const int32 id : pop_companions_where([party_id](const PopCompanion &c) { return c.party_id == party_id; })) {
 		map_session_data *shell = map_id2sd(id);
 		if (shell == nullptr) {
@@ -4786,6 +4884,10 @@ void population_engine_companions_reattach(party_data &p)
 
 void population_engine_companion_party_ready(map_session_data &owner)
 {
+	if (owner.pop.party_join_pending != 0) {
+		pop_party_join_ready(owner);
+		return;
+	}
 	const int32 id = owner.pop.companion_pending;
 	owner.pop.companion_pending = 0;
 	map_session_data *shell = map_id2sd(id);
@@ -4799,6 +4901,12 @@ void population_engine_companion_party_ready(map_session_data &owner)
 
 void population_engine_companion_party_failed(map_session_data &owner)
 {
+	if (owner.pop.party_join_pending != 0) {
+		const PopPartyGroup *g = pop_party_find(owner.pop.party_join_pending);
+		owner.pop.party_join_pending = 0;
+		if (map_session_data *leader = g != nullptr ? pop_party_leader_sd(*g) : nullptr)
+			pop_companion_whisper(owner, *leader, "We couldn't make a party for you. Try /organize, then ask us again.");
+	}
 	map_session_data *shell = map_id2sd(owner.pop.companion_pending);
 	owner.pop.companion_pending = 0;
 	if (shell != nullptr && population_engine_is_population_pc(shell->id))
@@ -4956,8 +5064,12 @@ static void pop_companion_on_whispered_request(map_session_data &from, map_sessi
 		pop_companion_whisper(from, bot, "I'm already with you.");
 		return;
 	}
+	if (bot.pop.party_group != 0) { // a shell party's member: the player asks to join the party
+		pop_party_on_join_request(from, bot, true);
+		return;
+	}
 	if (!pop_companion_is_available(bot)) {
-		pop_companion_whisper(from, bot, bot.pop.party_group != 0 ? "Sorry, I'm in a party already." : "Sorry, I'm busy right now.");
+		pop_companion_whisper(from, bot, "Sorry, I'm busy right now.");
 		return;
 	}
 	if (from.status.party_id != 0) {
@@ -5376,8 +5488,9 @@ bool population_engine_arena_is_ally(const map_session_data *a, const map_sessio
 {
     if (!a || !b || a == b)
         return false;
-    // nostalRE: a companion looks after its party like an ally shell looks after the arena player
-    if (a->pop.companion_owner != 0 && a->status.party_id == b->status.party_id)
+    // nostalRE: a companion looks after its party like an ally shell looks after the arena player, and so does a
+    // shell party's member after the player who joined it (until then its party id is its party's own)
+    if ((a->pop.companion_owner != 0 || a->pop.party_group != 0) && a->status.party_id == b->status.party_id)
         return true;
     return population_engine_arena_relation(
         reinterpret_cast<const block_list*>(a),

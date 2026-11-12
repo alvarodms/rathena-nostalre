@@ -185,6 +185,7 @@ struct s_population {
 	// --- nostalRE: party companion ---
 	uint32 companion_owner = 0;     ///< Shell: char id of the player whose party it joined (0 = plain shell).
 	int32  companion_pending = 0;   ///< Player: id of the shell waiting for this player's new party (0 = none).
+	uint32 party_join_pending = 0;  ///< Player: id of the shell party waiting for this player's new party (0 = none).
 	t_tick companion_next_scan = 0; ///< Shell: when to look for mobs around the owner again.
 	int16  companion_spot_x = -1;   ///< Shell: the cell it stands on next to its idle owner (-1 = none picked).
 	int16  companion_spot_y = -1;

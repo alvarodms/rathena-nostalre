@@ -71,7 +71,7 @@ void population_engine_report_levels(int fd, int16_t map_id);
 void population_engine_report_vendors(int fd, int16_t map_id);
 /// nostalRE: one chat line for each shell party on the map and for each of its members (@populate parties).
 void population_engine_report_parties(int fd, int16_t map_id);
-/// nostalRE: a player entered the chat room of `owner_id`; a shell party's leader answers them.
+/// nostalRE: a player entered the chat room of `owner_id`; a shell party's leader takes them into the party.
 void population_engine_on_chat_join(map_session_data &sd, int32_t owner_id);
 /// Stop combat mode for a population shell (teardown hat effect, cleanup, set state=false).
 /// Safe to call even if not in combat. Used by clif quit/restart paths.
@@ -80,22 +80,28 @@ void population_engine_combat_shell_stop(map_session_data *sd);
 void population_engine_on_whisper_to_population_pc(map_session_data *from_sd, map_session_data *bot_sd, const char *message);
 /// nostalRE: party companions. A shell in a real player's party holds a member slot on this map server only; the
 /// companion record in population_engine.cpp says whose it is, and party slots follow from it.
+/// A shell party's members a player joined hold companion slots the same way, without the follow-the-owner part
+/// (population_party.cpp); the hooks below cover them too.
 /// party_invite on a shell lands here; replies to `owner` and returns whether the shell joined.
 bool population_engine_companion_invite(map_session_data &owner, map_session_data &shell);
 /// The one way out: the shell leaves its slot and the record, and is a plain shell again. `whisper`, when set, goes
-/// to the owner first. Does nothing for a shell that is not a companion.
+/// to the owner first. A shell party's member leaves the player's party and stays with its own. Does nothing for a
+/// shell in no player's party.
 void population_engine_companion_dismiss(map_session_data &shell, bool expelled, const char *whisper);
-/// `owner` is leaving their party or the server: their companions leave too.
+/// `owner` is leaving their party or the server: their companions leave too, and a shell party they joined.
 void population_engine_companions_of_owner_leave(map_session_data &owner);
-/// Party `party_id` is broken: its companions leave.
+/// Party `party_id` is broken: its companions and shell party members leave.
 void population_engine_companions_of_party_leave(int party_id);
 /// party_recv_info took the char-server's member list: put this party's companions back in free slots.
 void population_engine_companions_reattach(struct party_data &p);
-/// The party made for a whispered request exists / could not be made.
+/// The party made for a whispered request, or for joining a shell party, exists / could not be made.
 void population_engine_companion_party_ready(map_session_data &owner);
 void population_engine_companion_party_failed(map_session_data &owner);
 /// Whether `sd` is a party companion. `sd` may be nullptr.
 bool population_engine_is_companion(const map_session_data *sd);
+/// Whether `sd` is a shell in a player's real party: a companion, or a member of a shell party the player joined.
+/// Its EXP and zeny shares are lost: a shell is not saved. `sd` may be nullptr.
+bool population_engine_shell_in_player_party(const map_session_data *sd);
 /// The player `sd` fights for when it is a companion and they are online, else nullptr. `sd` may be nullptr.
 map_session_data *population_engine_companion_owner(const map_session_data *sd);
 

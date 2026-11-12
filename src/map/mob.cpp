@@ -3227,7 +3227,7 @@ int32 mob_dead(mob_data *md, block_list *src, int32 type)
 						pc_gainexp(tmpsd[i], md, base_exp, job_exp, 0);
 					}
 				}
-				if(zeny && !population_engine_is_companion(tmpsd[i])) // zeny from mobs [Valaris]; nostalRE: a shell's would be logged
+				if(zeny && !population_engine_shell_in_player_party(tmpsd[i])) // zeny from mobs [Valaris]; nostalRE: a shell's would be logged
 					pc_getzeny(tmpsd[i], zeny, LOG_TYPE_PICKDROP_MONSTER);
 			}
 		}
