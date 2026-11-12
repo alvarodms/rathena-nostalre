@@ -91,7 +91,9 @@ files we do not use. Our changes carry a `nostalRE` comment:
   the mean level of their map's permanent monsters, with a floor by class (a
   Knight is at least 45); towns and maps with no monsters use 30-85. A class
   whose floor is clearly above the map steps down (Knight to Swordsman to
-  Novice) and still counts as its spawn-table job. Stats are fitted to what the
+  Novice); a first class on a map with monsters from level 40 may step up to a
+  second class, and from level 60 always does (Swordsman to Knight or Crusader).
+  Either way it still counts as its spawn-table job. Stats are fitted to what the
   level has in `db/re/statpoint.yml`, gear to what it can wear; a shell below its
   whole weapon pool gets the plainest weapon of that kind its job can wear.
   Off, and arena and `@populate` shells either way: the profile's range or 99/70.

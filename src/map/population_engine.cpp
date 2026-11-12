@@ -262,13 +262,52 @@ static void population_class_level_range(uint16_t job_id, int32_t& floor_level, 
 	floor_level = std::min(floor_level, cap);
 }
 
+/// A first class on a map players hunt on after their job change moves up to one of its
+/// second classes (Swordsman to Knight or Crusader), so Glast Heim holds no level 70
+/// Mages. Monsters below level 40 keep every first class, from 60 up none; in between the
+/// chance grows with the map. Towns keep theirs. A second class with no entry in
+/// db/population_engine.yml (no gear, no skills) is not picked. Novices, Gunslingers and
+/// Ninjas stay: their second class is not a step players take mid-levels.
+static uint16_t population_promote_job_for_map(uint16_t job_id, int16_t map_id, uint8_t map_category)
+{
+	static constexpr int32_t PROMOTE_FROM = 40, PROMOTE_ALL = 60;
+	const uint64 mapid = pc_jobid2mapid(job_id);
+	const uint64 base_class = mapid & MAPID_FIRSTMASK;
+	if ((mapid & (JOBL_2 | JOBL_THIRD | JOBL_FOURTH)) != 0 || base_class == MAPID_NOVICE
+		|| base_class == MAPID_GUNSLINGER || base_class == MAPID_NINJA)
+		return job_id;
+
+	const int32_t map_level = map_category == 1 ? 0 : population_map_mob_level(map_id);
+	if (map_level < PROMOTE_FROM)
+		return job_id;
+	if (map_level < PROMOTE_ALL
+		&& static_cast<int32_t>(rnd() % (PROMOTE_ALL - PROMOTE_FROM)) >= map_level - PROMOTE_FROM)
+		return job_id;
+
+	std::vector<uint16_t> seconds;
+	for (const uint64 branch : { JOBL_2_1, JOBL_2_2 }) {
+		// Bard and Dancer are one class by sex; the shell's sex follows the job.
+		for (const int32 sex : { SEX_MALE, SEX_FEMALE }) {
+			const int32 second = pc_mapid2jobid(base_class | branch, sex);
+			if (second > 0 && std::find(seconds.begin(), seconds.end(), second) == seconds.end()
+				&& population_engine_find_any(static_cast<uint16_t>(second)) != nullptr)
+				seconds.push_back(static_cast<uint16_t>(second));
+		}
+	}
+	return seconds.empty() ? job_id : seconds[rnd() % seconds.size()];
+}
+
 /// The job a shell takes on this map: a class that cannot be this low steps down, so a
 /// Poring field holds Novices and new first classes instead of level 45 Knights. A second
 /// or third class becomes its first class (Knight to Swordsman, Super Novice to Novice),
 /// and a first class becomes a Novice. A few levels of slack keep the step for maps
-/// clearly too low.
+/// clearly too low. A first class on a high map steps up (population_promote_job_for_map).
 static uint16_t population_fit_job_to_map(uint16_t job_id, int16_t map_id, uint8_t map_category)
 {
+	const uint16_t promoted = population_promote_job_for_map(job_id, map_id, map_category);
+	if (promoted != job_id)
+		return promoted;
+
 	static constexpr int32_t FLOOR_SLACK = 5;
 	const PopulationLevelBand band = population_map_level_band(map_id, map_category);
 	uint16_t job = job_id;
