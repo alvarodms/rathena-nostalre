@@ -73,6 +73,9 @@
 #       ally_count_nearby — >= CondValue allies within detection range.
 #       enemy_is_boss    — target is an MVP/boss monster.
 #       enemy_is_player  — target is a player (PvP), not a monster. (nostalRE)
+#       ally_dead        — a dead ally lies in skill range (Resurrection). (nostalRE)
+#       ally_sp_below    — an ally in skill range has SP% < CondValue, and less SP than
+#                          half the shell's: what Soul Exchange would leave it. (nostalRE)
 #       sp_above         — self SP% > CondValue.
 #       self_being_cast_on — any nearby unit is casting a skill targeting this shell,
 #                          or casting a ground skill within CondValue cells (default 3).
@@ -2263,3 +2266,72 @@ Body:
       - { SkillId: HT_BLITZBEAT,     Level: 5,  Rate: 4000 }
       - { SkillId: AC_CHARGEARROW,   Level: 1,  Rate: 6000, Kind: escape, Condition: distance_below, CondValue: 2 }
       - { SkillId: HT_DETECTING,     Level: 4,  Condition: enemy_hidden }
+
+  ###########################################################################
+  # nostalRE: named skill sets for shell parties (db/population_party.yml SkillSet:).
+  # A party's members at the camp fight only what attacks the camp, and their allies are
+  # their party alone.
+  ###########################################################################
+
+  # The priest of a camp: raises the party's dead, tops its members up, keeps them buffed.
+  - Name: priest_camp
+    JobId: 8
+    Skills:
+      - { SkillId: ALL_RESURRECTION, Level: 4,  Rate: 10000, Target: ally, Kind: heal, Condition: ally_dead }
+      - { SkillId: AL_HEAL,          Level: 10, Rate: 10000, Target: self, Condition: hp_below, CondValue: 60 }
+      - { SkillId: AL_HEAL,          Level: 10, Rate: 10000, Target: ally, Condition: ally_hp_below, CondValue: 90 }
+      - { SkillId: AL_BLESSING,      Level: 10, Rate: 10000, Target: ally, Condition: not_ally_status, CondValue: SC_BLESSING }
+      - { SkillId: AL_INCAGI,        Level: 10, Rate: 10000, Target: ally, Condition: not_ally_status, CondValue: SC_INCREASEAGI }
+      - { SkillId: PR_MAGNIFICAT,    Level: 5,  Target: self, Condition: not_self_status, CondValue: SC_MAGNIFICAT }
+      - { SkillId: PR_GLORIA,        Level: 5,  Target: self, Condition: not_self_status, CondValue: SC_GLORIA }
+      - { SkillId: AL_BLESSING,      Level: 10, Target: self, Condition: not_self_status, CondValue: SC_BLESSING }
+      - { SkillId: AL_INCAGI,        Level: 10, Target: self, Condition: not_self_status, CondValue: SC_INCREASEAGI }
+      - { SkillId: PR_KYRIE,         Level: 10, Target: self, Condition: melee_attacked, Cooldown: 5000 }
+      - { SkillId: PR_LEXAETERNA,    Level: 1,  Rate: 6000, Condition: not_enemy_status, CondValue: SC_AETERNA }
+      - { SkillId: AL_HOLYLIGHT,     Level: 1,  Rate: 3000 }
+
+  # The Professor of a camp: Soul Exchange for a member out of SP, then its own HP into SP,
+  # which the camp's priest heals back. Bolts for what attacks the camp.
+  - Name: professor_battery
+    JobId: 4017
+    Skills:
+      - { SkillId: PF_SOULCHANGE,    Level: 1,  Rate: 10000, Target: ally, Kind: buff, Cooldown: 3000, Condition: ally_sp_below, CondValue: 40 }
+      - SkillId: PF_HPCONVERSION
+        Level: 5
+        Target: self
+        Cooldown: 1500
+        Condition:
+          AND:
+            - self_sp_pct_lt70
+            - self_hp_pct_gt45
+      - { SkillId: PF_DOUBLECASTING, Level: 5,  Target: self, Condition: self_targeted }
+      - { SkillId: MG_FROSTDIVER,    Level: 10, Rate: 5000, Cooldown: 1500, Condition: not_enemy_status, CondValue: SC_FREEZE }
+      - { SkillId: MG_LIGHTNINGBOLT, Level: 10, Rate: 5000, Condition: enemy_status, CondValue: SC_FREEZE }
+      - { SkillId: MG_COLDBOLT,      Level: 10, Rate: 5000 }
+      - { SkillId: MG_FIREBOLT,      Level: 10, Rate: 5000 }
+
+  # The Bard of a camp: a song always up, an ensemble with the Dancer on the next cell.
+  - Name: bard_camp
+    JobId: 19
+    Skills:
+      - { SkillId: BD_DRUMBATTLEFIELD, Level: 5,  Target: self, Kind: buff, Condition: not_self_status, CondValue: SC_DRUMBATTLE }
+      - { SkillId: BD_RINGNIBELUNGEN,  Level: 5,  Target: self, Kind: buff, Condition: not_self_status, CondValue: SC_NIBELUNGEN }
+      - { SkillId: BA_POEMBRAGI,       Level: 10, Target: self, Kind: buff, Condition: not_self_status, CondValue: SC_POEMBRAGI }
+      - { SkillId: BA_APPLEIDUN,       Level: 10, Target: self, Kind: buff, Condition: not_self_status, CondValue: SC_APPLEIDUN }
+      - { SkillId: BA_ASSASSINCROSS,   Level: 10, Target: self, Kind: buff, Condition: not_self_status, CondValue: SC_ASSNCROS }
+      - { SkillId: BA_WHISTLE,         Level: 10, Target: self, Kind: buff, Condition: not_self_status, CondValue: SC_WHISTLE }
+      - { SkillId: BA_MUSICALSTRIKE,   Level: 5,  Rate: 10000 }
+      - { SkillId: AC_DOUBLE,          Level: 10, Rate: 8000 }
+      - { SkillId: AC_CHARGEARROW,     Level: 1,  Rate: 9000, Condition: damaged_gt, CondValue: 20, Cooldown: 3000 }
+
+  # The Dancer of a camp.
+  - Name: dancer_camp
+    JobId: 20
+    Skills:
+      - { SkillId: BD_SIEGFRIED,       Level: 5,  Target: self, Kind: buff, Condition: not_self_status, CondValue: SC_SIEGFRIED }
+      - { SkillId: DC_SERVICEFORYOU,   Level: 10, Target: self, Kind: buff, Condition: not_self_status, CondValue: SC_SERVICE4U }
+      - { SkillId: DC_FORTUNEKISS,     Level: 10, Target: self, Kind: buff, Condition: not_self_status, CondValue: SC_FORTUNE }
+      - { SkillId: DC_HUMMING,         Level: 10, Target: self, Kind: buff, Condition: not_self_status, CondValue: SC_HUMMING }
+      - { SkillId: DC_THROWARROW,      Level: 5,  Rate: 10000 }
+      - { SkillId: AC_DOUBLE,          Level: 10, Rate: 8000 }
+      - { SkillId: AC_CHARGEARROW,     Level: 1,  Rate: 9000, Condition: damaged_gt, CondValue: 20, Cooldown: 3000 }

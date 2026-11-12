@@ -18,6 +18,7 @@
 { "population_engine_demand_spawn",&battle_config.population_engine_demand_spawn,1,0,1,}, // nostalRE
 { "population_engine_demand_grace_ms",&battle_config.population_engine_demand_grace_ms,300000,0,INT_MAX,}, // nostalRE
 { "population_engine_density_pct",&battle_config.population_engine_density_pct,100,10,300,}, // nostalRE
+{ "population_engine_parties",&battle_config.population_engine_parties,1,0,1,}, // nostalRE
 { "population_engine_companion_max",&battle_config.population_engine_companion_max,3,0,MAX_PARTY - 1,}, // nostalRE
 { "population_engine_vendor_pct",&battle_config.population_engine_vendor_pct,100,10,1000,}, // nostalRE
 { "population_engine_vendor_price_pct",&battle_config.population_engine_vendor_price_pct,100,10,1000,}, // nostalRE

@@ -193,6 +193,29 @@ struct s_population {
 	t_tick companion_react_at = 0;  ///< Shell: when it reacts to the owner's move (0 = nothing to react to).
 	t_tick companion_next_shuffle = 0; ///< Shell: when it may take a step while its owner stands still.
 
+	// --- nostalRE: shell party (db/population_party.yml) ---
+	uint32 party_group = 0;         ///< Shell: id of the party it is a member of (0 = none).
+	uint8  party_duty = 0;          ///< PopPartyDuty.
+	uint8  party_state = 0;         ///< Roamer: PopPartyRoam (at the camp, out hunting, on its way back).
+	bool   party_regroup = false;   ///< Roamer: strayed past its leash, walking back within it.
+	bool   party_buffed = false;    ///< Roamer: left the camp with the support's buffs on.
+	bool   party_down = false;      ///< It died and has not been seen up since.
+	int16  party_spot_x = -1;       ///< Its own cell at the camp.
+	int16  party_spot_y = -1;
+	t_tick party_next_scan = 0;     ///< When it looks again for monsters on the camp.
+	t_tick party_idle_since = 0;    ///< On its cell with nothing to do since then (0 = busy).
+	t_tick party_arrived_at = 0;    ///< Roamer: when it got back to the camp.
+	t_tick party_wait_until = 0;    ///< Roamer at the camp: leaves by then, topped up or not.
+	t_tick party_left_at = 0;       ///< Roamer: when it last left the camp.
+	t_tick party_trip_until = 0;    ///< Roamer: heads back then (0 = no limit).
+	t_tick party_ticked_at = 0;     ///< Its last duty tick: members stand still while no player is on their map.
+	t_tick party_progress_at = 0;   ///< Walking to the camp: when it last got closer.
+	int16  party_progress_dist = 0; ///< ... and how close that was.
+	uint32 party_trips = 0;         ///< Roamer: times it came back (@populate parties).
+	uint32 party_revived = 0;       ///< Times a member raised it (@populate parties).
+	uint32 party_helps = 0;         ///< Skills it cast on its party's members (@populate parties).
+	std::string party_skill_set;    ///< Its slot's SkillSet in population_skill_db.yml (empty: its build's or job's).
+
 	// --- nostalRE: personality (db/population_personality.yml), rolled at spawn ---
 	std::shared_ptr<const PopBuild> build;             ///< what it made of its class (nullptr: the job's own)
 	std::shared_ptr<const PopTemperament> temperament; ///< how it plays (nullptr: no file, plays as before)

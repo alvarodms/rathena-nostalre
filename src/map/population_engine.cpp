@@ -398,12 +398,20 @@ static uint16_t population_promote_job_for_map(uint16_t job_id, int16_t map_id, 
 /// or third class becomes its first class (Knight to Swordsman, Super Novice to Novice),
 /// and a first class becomes a Novice. A few levels of slack keep the step for maps
 /// clearly too low. A first class on a high map steps up (population_promote_job_for_map).
+static uint16_t population_step_down_job_for_map(uint16_t job_id, int16_t map_id, uint8_t map_category);
+
 static uint16_t population_fit_job_to_map(uint16_t job_id, int16_t map_id, uint8_t map_category)
 {
 	const uint16_t promoted = population_promote_job_for_map(job_id, map_id, map_category);
 	if (promoted != job_id)
 		return promoted;
+	return population_step_down_job_for_map(job_id, map_id, map_category);
+}
 
+/// The stepping down alone, which is all a party's slots take: they name the class they want, and a map too
+/// low for it gets the class below (pop_party_roll_plan).
+static uint16_t population_step_down_job_for_map(uint16_t job_id, int16_t map_id, uint8_t map_category)
+{
 	static constexpr int32_t FLOOR_SLACK = 5;
 	const PopulationLevelBand band = population_map_level_band(map_id, map_category);
 	uint16_t job = job_id;
@@ -1065,6 +1073,7 @@ void population_engine_shell_release(map_session_data* sd)
 	if (map_id2bl(sd->id) != sd)
 		return;
 	population_engine_companion_dismiss(*sd, false, nullptr); // nostalRE: while its party id is the real one
+	population_party_detach(*sd); // nostalRE: its place in a shell party is free again
 	sd->status.party_id = 0; // clear fake population party ID before teardown
 	g_pop_chat_next_tick.erase(sd->id);
 	population_engine_path_erase_for_pc(sd->id);
@@ -1185,9 +1194,11 @@ static uint32_t population_engine_allocate_index()
 ///                  Used by the VendorPlacement-driven pass which controls its own
 ///                  population target via PopulationVendorPlacement::max_vendors.
 /// Returns the number of shells actually spawned.
+/// nostalRE: `party`: the shell is for this place in a shell party: the party's job on the member's cell at
+/// the camp, counted by the quota as `job_hint` all the same (a party takes its members out of the map's budget).
 static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint = UINT16_MAX,
                                   size_t* tick_budget = nullptr, uint8_t map_category = 0,
-                                  bool bypass_existing_check = false)
+                                  bool bypass_existing_check = false, const PopPartySpawn* party = nullptr)
 {
 	if (want == 0)
 		return 0;
@@ -1235,8 +1246,8 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 		// Pre-resolve the equipment/behavior for this slot so vendor placement constraints
 		// can be applied to the cell pick (vendors are restricted to specific maps/areas
 		// and must respect a minimum spacing from other vendor shells).
-		const uint16_t pre_job_id = (job_hint != UINT16_MAX && pcdb_checkid(job_hint))
-			? job_hint : get_random_job_id();
+		const uint16_t pre_job_id = party != nullptr ? party->job
+			: (job_hint != UINT16_MAX && pcdb_checkid(job_hint)) ? job_hint : get_random_job_id();
 		PopulationDbSource pre_src = PopulationDbSource::Main;
 		auto pre_equipment = population_engine_find_any(pre_job_id, &pre_src);
 		if (!pre_equipment) {
@@ -1271,7 +1282,7 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 			if (cat_beh != PopulationBehavior::None)
 				eff_beh = cat_beh;
 		}
-		const bool is_vendor_spawn = (eff_beh == PopulationBehavior::Vendor);
+		const bool is_vendor_spawn = party == nullptr && (eff_beh == PopulationBehavior::Vendor);
 
 		// Vendor placement — use the map-level entry pre-computed before the slot loop.
 		const PopulationVendorPlacement *vp = is_vendor_spawn ? map_vp : nullptr;
@@ -1298,7 +1309,10 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 
 		// Find a walkable spawn position.
 		int x = 0, y = 0;
-		if (mapdata->xs > 0 && mapdata->ys > 0) {
+		if (party != nullptr) { // nostalRE: its cell at the camp
+			x = party->x;
+			y = party->y;
+		} else if (mapdata->xs > 0 && mapdata->ys > 0) {
 			int16_t sx = 0, sy = 0;
 
 			// Determine search area. Default keeps a 50-cell border on large maps,
@@ -1380,7 +1394,8 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 		// nostalRE: a class that cannot be this low steps down (Knight to Swordsman to Novice),
 		// with that class's gear and behaviour. It still counts as its spawn-table job
 		// (pop.spawn_job), or the map would refill without end. Vendors keep their class.
-		if (battle_config.population_engine_map_levels && !is_vendor_spawn) {
+		// A party's place names its class, fitted to the map already.
+		if (battle_config.population_engine_map_levels && !is_vendor_spawn && party == nullptr) {
 			const uint16_t fitted_job = population_fit_job_to_map(job_id, map_id, map_category);
 			if (fitted_job != job_id) {
 				job_id = fitted_job;
@@ -1394,6 +1409,10 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 		std::shared_ptr<const PopBuild> build;
 		std::shared_ptr<const PopTemperament> temperament;
 		population_personality_db().roll(job_id, build, temperament);
+		if (party != nullptr && !party->build.empty()) { // its place in the party says which
+			if (const auto named = population_personality_db().find_build(party->build, job_id))
+				build = named;
+		}
 		if (build != nullptr && equipment != nullptr && !is_vendor_spawn)
 			equipment = population_apply_build(*equipment, *build);
 		else
@@ -1466,8 +1485,11 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 			map_base_level, map_job_level);
 
 		if (sd) {
-			sd->pop.spawn_job = pre_job_id; // nostalRE: the quota counts this, not a stepped-down class
+			// nostalRE: the quota counts this, not a stepped-down class or a party's
+			sd->pop.spawn_job = party != nullptr && job_hint != UINT16_MAX ? job_hint : pre_job_id;
 			population_shell_take_personality(sd, build, temperament); // nostalRE
+			if (party != nullptr)
+				population_party_attach(*sd, party->group, party->member);
 			g_population_engine_pcs.push_back(sd);
 			g_population_engine_count++;
 			g_population_engine_stats.total_created++;
@@ -1646,6 +1668,204 @@ static int32_t pop_density_scaled(int32_t v) {
 	return static_cast<int32_t>(out < 1 ? 1 : out);
 }
 
+// ---- nostalRE: shell parties (db/population_party.yml) -------------------------------------
+// Shells that play as a party: a leader at a camp, a support by them, roamers who hunt around it
+// and come back for heals and buffs, on some maps a Bard and Dancer singing and a Professor
+// giving SP. What a member does is runtime/population_party.cpp's; here the parties are made and
+// filled. A party is made when its map comes alive and takes its members out of the map's budget:
+// the spawner, about to add a shell to the map, gives it to a party with a free place instead
+// (pop_party_claim), and the quota still counts it as the job it was going to be.
+// Switch: population_engine_parties.
+
+/// "LF> party {map} {level}+": the map's name and its monsters' level, rounded down to a five.
+static std::string pop_party_title(const std::string& templ, int16 m)
+{
+	std::string title = templ;
+	const struct map_data* mapdata = map_getmapdata(m);
+	const int32_t level = population_map_mob_level(m);
+	population_engine_chat_replace_all(title, "{map}", mapdata != nullptr ? mapdata->name : "");
+	population_engine_chat_replace_all(title, "{level}", std::to_string(level - level % 5));
+	if (title.size() >= CHATROOM_TITLE_SIZE)
+		title.resize(CHATROOM_TITLE_SIZE - 1);
+	return title;
+}
+
+/// Who a new party is made of: each slot rolled (is it there, how many, which job), the jobs fitted to the
+/// map's level. A map too low for a class gets the class below it (Priest to Acolyte, Knight to Swordsman),
+/// and a slot whose duty needs the class itself is left out: no songs without a Bard, no Soul Exchange
+/// without a Professor, no support from a Novice.
+static void pop_party_roll_plan(PopPartyGroup& g, const PopPartyMap& pm)
+{
+	const PopPartyTemplate& tpl = *g.tpl;
+	const auto add = [&g](const PopPartySlot& slot, size_t slot_index, uint16_t job, const std::string& skill_set, bool keep_class) -> int {
+		if (g.members.size() >= MAX_PARTY)
+			return -1;
+		const uint16_t fitted = battle_config.population_engine_map_levels ? population_step_down_job_for_map(job, g.m, 2) : job;
+		if (fitted != job && keep_class)
+			return -1;
+		PopPartyMember member;
+		member.duty = slot.duty;
+		member.slot = static_cast<uint8_t>(slot_index);
+		member.job = fitted;
+		// a skill set is for the class it was written for (and its transcendent): a slot of Priests and
+		// Knights can name the Priests'. The build is checked against the job at spawn.
+		const uint16_t set_job = skill_set.empty() ? 0 : population_skill_db().set_job(skill_set);
+		if (set_job != 0 && (pc_jobid2mapid(fitted) & MAPID_SECONDMASK) == (pc_jobid2mapid(set_job) & MAPID_SECONDMASK))
+			member.skill_set = skill_set;
+		member.build = slot.build;
+		g.members.push_back(member);
+		return static_cast<int>(g.members.size()) - 1;
+	};
+
+	// in the order a short budget fills them: a party of a leader and two killers, not of a leader and a band
+	for (const PopPartyDuty duty : { PopPartyDuty::Anchor, PopPartyDuty::Support, PopPartyDuty::Roamer, PopPartyDuty::Performer, PopPartyDuty::Battery }) {
+		for (size_t i = 0; i < tpl.slots.size(); i++) {
+			const PopPartySlot& slot = tpl.slots[i];
+			if (slot.duty != duty)
+				continue;
+			const int32_t chance = pm.chance[static_cast<size_t>(duty)] >= 0 ? pm.chance[static_cast<size_t>(duty)] : slot.chance;
+			int32_t count = rnd_value(slot.count_min, slot.count_max);
+			if (duty == PopPartyDuty::Anchor) {
+				if (!g.members.empty())
+					continue; // one leader
+				count = 1;
+			} else if (static_cast<int32_t>(rnd() % 100) >= chance) {
+				continue;
+			}
+			// a leader who does not heal needs someone who does
+			if (duty == PopPartyDuty::Support && count == 0 && !g.members.empty() && !pop_party_member_heals(g, g.members.front()))
+				count = 1;
+			for (int32_t n = 0; n < count; n++) {
+				const uint16_t* job = pop_pick_weighted(slot.jobs);
+				if (job == nullptr)
+					break;
+				const int index = add(slot, i, *job, slot.skill_set, duty == PopPartyDuty::Performer || duty == PopPartyDuty::Battery);
+				if (index < 0)
+					continue;
+				if (duty == PopPartyDuty::Support && !pop_party_job_heals(g.members[index].job)) {
+					g.members.pop_back();
+					continue;
+				}
+				if (duty == PopPartyDuty::Performer && slot.partner_job != 0) {
+					const int partner = add(slot, i, slot.partner_job, slot.partner_skill_set, true);
+					if (partner < 0) {
+						g.members.pop_back();
+						continue;
+					}
+					g.members[index].pair = static_cast<int16>(partner);
+					g.members[partner].pair = static_cast<int16>(index);
+				}
+			}
+		}
+	}
+}
+
+/// Makes the parties of the maps that are alive and ends those of maps that are not.
+static void pop_parties_maintain()
+{
+	for (auto it = g_pop_parties.begin(); it != g_pop_parties.end();) {
+		if (battle_config.population_engine_parties && pop_map_is_live(it->second.m)) {
+			++it;
+			continue;
+		}
+		population_party_disband(it->second);
+		it = g_pop_parties.erase(it);
+	}
+	if (!battle_config.population_engine_parties)
+		return;
+
+	for (const auto& pm : population_party_db().maps()) {
+		const int16 mid = map_mapname2mapid(pm->map.c_str());
+		if (mid < 0 || !pop_map_is_live(mid))
+			continue;
+		for (const auto& wanted : pm->parties) {
+			const std::shared_ptr<const PopPartyTemplate> tpl = population_party_db().find(wanted.first);
+			if (tpl == nullptr)
+				continue;
+			size_t on_map = 0, of_kind = 0;
+			for (const auto& entry : g_pop_parties) {
+				if (entry.second.m != mid)
+					continue;
+				on_map++;
+				if (entry.second.tpl->name == tpl->name)
+					of_kind++;
+			}
+			// as many as the map's entry says, scaled like the crowd they come out of
+			for (const size_t want = static_cast<size_t>(pop_density_scaled(wanted.second)); of_kind < want; of_kind++, on_map++) {
+				PopPartyGroup g;
+				g.m = mid;
+				g.tpl = tpl;
+				bool placed = false;
+				if (on_map < pm->camps.size()) {
+					g.camp_x = pm->camps[on_map].first;
+					g.camp_y = pm->camps[on_map].second;
+					placed = map_getcell(mid, g.camp_x, g.camp_y, CELL_CHKPASS) != 0;
+					if (!placed)
+						ShowWarning("Population engine: party camp %d,%d on '%s' is not walkable; picking a spot.\n", g.camp_x, g.camp_y, pm->map.c_str());
+				}
+				if (!placed && !pop_party_pick_camp(mid, g.camp_x, g.camp_y))
+					break; // no room on the map now; tried again next time
+				if (!tpl->recruit.empty() && static_cast<int32_t>(rnd() % 100) < tpl->recruit_chance)
+					g.title = pop_party_title(tpl->recruit[rnd() % tpl->recruit.size()], mid);
+				g.id = ++g_pop_party_serial;
+				pop_party_roll_plan(g, *pm);
+				if (g.members.empty())
+					continue;
+				g_pop_parties[g.id] = std::move(g);
+			}
+		}
+	}
+}
+
+/// A free place in one of the map's parties, for the shell the spawner is about to add.
+static bool pop_party_claim(int16 m, PopPartySpawn& out)
+{
+	for (auto& entry : g_pop_parties) {
+		PopPartyGroup& g = entry.second;
+		if (g.m != m)
+			continue;
+		for (size_t i = 0; i < g.members.size(); i++) {
+			PopPartyMember& member = g.members[i];
+			if (member.shell_id != 0 || member.spawn_fails >= 3)
+				continue;
+			pop_party_pick_spot(g, i);
+			out.group = g.id;
+			out.member = i;
+			out.job = member.job;
+			out.x = member.spot_x;
+			out.y = member.spot_y;
+			out.build = member.build;
+			return true;
+		}
+	}
+	return false;
+}
+
+/// The spawner could not make the shell (no free index, the job has no entry): after three tries the place stays empty.
+static void pop_party_claim_failed(const PopPartySpawn& claim)
+{
+	const auto it = g_pop_parties.find(claim.group);
+	if (it != g_pop_parties.end() && claim.member < it->second.members.size())
+		it->second.members[claim.member].spawn_fails++;
+}
+
+void population_engine_report_parties(int fd, int16_t map_id)
+{
+	population_party_report(fd, map_id);
+}
+
+/// A player walked into a party leader's chat room. Until players can join a shell party the leader says so.
+void population_engine_on_chat_join(map_session_data& sd, int32_t owner_id)
+{
+	map_session_data* leader = map_id2sd(owner_id);
+	if (leader == nullptr || !population_engine_is_population_pc(leader->id) || leader->pop.party_group == 0
+		|| population_engine_is_population_pc(sd.id))
+		return;
+	char line[CHAT_SIZE_MAX + NAME_LENGTH * 2];
+	safesnprintf(line, sizeof(line), "%s : Sorry, we're full right now!", leader->status.name);
+	clif_GlobalMessage(*leader, line, CHAT_WOS);
+}
+
 TIMER_FUNC(population_engine_autosummon_timer)
 {
 	PE_PERF_SCOPE("timer.autosummon");
@@ -1690,6 +1910,7 @@ TIMER_FUNC(population_engine_autosummon_timer)
 	if (battle_config.population_engine_demand_spawn)
 		pop_release_vacant_shells(max_global);
 	pop_end_vendor_shifts(); // nostalRE
+	pop_parties_maintain(); // nostalRE: before the fill below, which gives the parties their members
 
 	if (g_population_engine_count.load() >= max_global)
 		return 0;
@@ -1748,6 +1969,13 @@ TIMER_FUNC(population_engine_autosummon_timer)
 					if (pbudget != nullptr && *pbudget == 0) return true;
 					if (g_population_engine_count.load() >= max_global) return true;
 					const uint16_t pick = profile_jobs[rnd() % profile_jobs.size()];
+					// nostalRE: a party on the map with a free place takes the shell
+					PopPartySpawn party_place;
+					if (category != 1 && pop_party_claim(mid, party_place)) {
+						if (autosummon_fill_map(mid, 1, pick, pbudget, category, /*bypass_existing_check=*/true, &party_place) == 0)
+							pop_party_claim_failed(party_place);
+						continue;
+					}
 					autosummon_fill_map(mid, 1, pick, pbudget, category, /*bypass_existing_check=*/true);
 				}
 				if (g_population_engine_count.load() >= max_global) return true;
@@ -1896,6 +2124,7 @@ TIMER_FUNC(population_engine_global_combat_timer)
 	s_pop_combat_tick_ctx ctx;
 	ctx.ticked.reserve(64);
 	map_foreachpc(pop_combat_tick_per_real_pc, &ctx);
+	population_party_tick_unseen(ctx.ticked); // nostalRE: a party's roamers come back from out of sight
 	return 0;
 }
 
@@ -1915,6 +2144,8 @@ TIMER_FUNC(population_engine_respawn_shell_timer)
 		return 0;
 	}
 	if (!pc_isdead(sd))
+		return 0;
+	if (population_party_respawn(*sd)) // nostalRE: a shell party's member gets up at its camp
 		return 0;
 
 	const int16_t spawn_map = sd->pop.spawn_map_id;
@@ -1989,7 +2220,11 @@ void population_engine_on_shell_death(map_session_data *sd)
 		sd->pop.respawn_timer = INVALID_TIMER;
 	}
 	// Schedule respawn 5 s after death, matching typical mob respawn feel.
-	sd->pop.respawn_timer = add_timer(gettick() + 5000, population_engine_respawn_shell_timer, sd->id, 0);
+	// nostalRE: a party member lies there longer: for the party's healer when they saw it fall, else as long
+	// as a player takes to walk back from town; it gets up at the camp (population_party.cpp).
+	const t_tick party_delay = population_party_respawn_delay(*sd);
+	sd->pop.party_down = party_delay > 0;
+	sd->pop.respawn_timer = add_timer(gettick() + (party_delay > 0 ? party_delay : 5000), population_engine_respawn_shell_timer, sd->id, 0);
 }
 
 void population_engine_on_shell_kills_player(map_session_data *killer_sd, map_session_data *victim_sd)
@@ -2057,6 +2292,9 @@ void do_init_population_engine_load_databases() {
 	// nostalRE: after the skill db, whose skill sets the builds name
 	if (!population_personality_db().load())
 		ShowWarning("Population engine: population_personality.yml missing or invalid; shells play without personalities.\n");
+	// nostalRE: after the skill db too, for the skill sets its slots name
+	if (!population_party_db().load())
+		ShowWarning("Population engine: population_party.yml missing or invalid; shells form no parties.\n");
 	// Shared templates DB MUST load before the three job DBs so GearSet/Profile
 	// references in the job files can resolve via fallback lookup.
 	if (!population_shared_db().load())
@@ -2165,6 +2403,13 @@ bool population_engine_reload_equipment(uint32_t *out_entry_count)
 			population_personality_db().build_count(), population_personality_db().temperament_count());
 	else
 		ShowWarning("Population engine: population_personality.yml reload failed (missing or invalid).\n");
+
+	// nostalRE: parties on the map keep the template they were made from
+	if (population_party_db().reload())
+		ShowStatus("Population engine: population_party.yml reloaded (%zu parties, %zu maps).\n",
+			population_party_db().template_count(), population_party_db().maps().size());
+	else
+		ShowWarning("Population engine: population_party.yml reload failed (missing or invalid).\n");
 
 	const bool chat_re = population_chat_db().reload();
 	if (chat_re)
@@ -4198,6 +4443,7 @@ void population_engine_stop() {
     g_chat_cursor = 0;
     for (map_session_data* sd : to_release)
         population_engine_shell_release(sd);
+    g_pop_parties.clear(); // nostalRE: their members are gone
     population_engine_write_count_sql(0);
     ShowStatus("Population engine: Stopped.\n");
 }
@@ -4367,7 +4613,7 @@ static bool pop_companion_is_available(const map_session_data &shell)
 {
 	return battle_config.population_engine_companion_max > 0
 		&& shell.state.active && shell.prev != nullptr && !pc_isdead(const_cast<map_session_data *>(&shell))
-		&& shell.pop.arena_team == 0 && shell.pop.companion_owner == 0
+		&& shell.pop.arena_team == 0 && shell.pop.companion_owner == 0 && shell.pop.party_group == 0
 		&& !shell.state.vending && !shell.state.buyingstore
 		&& static_cast<PopulationBehavior>(shell.pop.behavior_base) != PopulationBehavior::Vendor;
 }
@@ -4400,7 +4646,7 @@ bool population_engine_companion_invite(map_session_data &owner, map_session_dat
 		return false;
 	if (!population_engine_is_population_pc(shell.id) || !pop_companion_is_available(shell)) {
 		clif_party_invite_reply(owner, shell.status.name,
-			shell.pop.companion_owner != 0 ? PARTY_REPLY_JOIN_OTHER_PARTY : PARTY_REPLY_JOINMSG_REFUSE);
+			shell.pop.companion_owner != 0 || shell.pop.party_group != 0 ? PARTY_REPLY_JOIN_OTHER_PARTY : PARTY_REPLY_JOINMSG_REFUSE);
 		return false;
 	}
 	if (shell.m != owner.m || pop_companion_map_is_closed(owner.m)) {
@@ -4711,7 +4957,7 @@ static void pop_companion_on_whispered_request(map_session_data &from, map_sessi
 		return;
 	}
 	if (!pop_companion_is_available(bot)) {
-		pop_companion_whisper(from, bot, "Sorry, I'm busy right now.");
+		pop_companion_whisper(from, bot, bot.pop.party_group != 0 ? "Sorry, I'm in a party already." : "Sorry, I'm busy right now.");
 		return;
 	}
 	if (from.status.party_id != 0) {

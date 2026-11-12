@@ -1906,7 +1906,8 @@ int32 npc_touch_areanpc(map_session_data* sd, int16 m, int16 x, int16 y, npc_dat
 
 	// nostalRE: a party companion follows its owner by its own warp (pop_companions_maintain). A portal would pc_setpos
 	// it off the map to wait for a client it does not have, and an OnTouch script would run for a shell.
-	if (population_engine_is_companion(sd))
+	// A shell party's member stays on its party's map: a roamer walking over a portal would be gone from the party.
+	if (population_engine_is_companion(sd) || sd->pop.party_group != 0)
 		return 1;
 
 	if (nd->is_invisible)

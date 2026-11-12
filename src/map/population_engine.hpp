@@ -69,6 +69,10 @@ size_t population_engine_get_count();
 void population_engine_report_levels(int fd, int16_t map_id);
 /// nostalRE: one chat line for each vendor shell on the map: cell, NPC clearance, shift left (@populate vendors).
 void population_engine_report_vendors(int fd, int16_t map_id);
+/// nostalRE: one chat line for each shell party on the map and for each of its members (@populate parties).
+void population_engine_report_parties(int fd, int16_t map_id);
+/// nostalRE: a player entered the chat room of `owner_id`; a shell party's leader answers them.
+void population_engine_on_chat_join(map_session_data &sd, int32_t owner_id);
 /// Stop combat mode for a population shell (teardown hat effect, cleanup, set state=false).
 /// Safe to call even if not in combat. Used by clif quit/restart paths.
 void population_engine_combat_shell_stop(map_session_data *sd);

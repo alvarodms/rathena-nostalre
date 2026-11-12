@@ -138,6 +138,7 @@ class PopulationSkillDatabase : public YamlDatabase {
 	/// nostalRE: entries with a Name: are skill sets a personality build picks (SkillSet:); the job's
 	/// unnamed entry stays its default.
 	std::unordered_map<std::string, std::vector<s_pop_skill_entry>> sets_;
+	std::unordered_map<std::string, uint16_t> set_jobs_; ///< nostalRE: the JobId a named set was written for
 
 public:
 	PopulationSkillDatabase();
@@ -148,6 +149,8 @@ public:
 	/// A named skill set (nullptr if none has that Name:).
 	const std::vector<s_pop_skill_entry>* find_set(const std::string& name) const;
 	size_t job_count() const;
+	/// nostalRE: the job a named skill set is for (0 if none has that Name:).
+	uint16_t set_job(const std::string& name) const;
 	size_t set_count() const { return sets_.size(); }
 };
 

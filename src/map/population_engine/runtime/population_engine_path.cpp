@@ -187,6 +187,8 @@ TIMER_FUNC(population_engine_wander_timer)
 		}
 		if (sd->pop.companion_owner != 0) // nostalRE: follows its owner instead
 			continue;
+		if (sd->pop.party_group != 0) // nostalRE: a shell party's member is where its duty puts it
+			continue;
 		++examined_count;
 
 		// Cleanup stale target exclusions. The combat tick only fires near real players,

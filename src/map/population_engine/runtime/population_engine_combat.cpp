@@ -10,6 +10,7 @@
 #include "../config/population_yaml_types.hpp"
 #include "../core/population_engine_core.hpp"
 #include "population_shell_runtime.hpp"
+#include "population_party.hpp" // nostalRE
 
 #include <algorithm>
 #include <cmath>
@@ -263,7 +264,8 @@ struct PopAllySearchCtx {
 /// nostalRE: a companion spends its heals and buffs on its party, not on the shells around it.
 static bool pop_companion_ignores_ally(const map_session_data *shell, const map_session_data *ally)
 {
-	return shell->pop.companion_owner != 0 && shell->status.party_id != ally->status.party_id;
+	return (shell->pop.companion_owner != 0 && shell->status.party_id != ally->status.party_id)
+		|| population_party_ignores_ally(shell, ally); // a party member's are for its party too
 }
 
 static int32 pop_ally_hp_scan_cb(block_list *bl, va_list ap)
@@ -299,6 +301,7 @@ static int32 pop_pack_share_target_cb(block_list *bl, va_list ap)
 	if (ally->id == source_id) return 0;
 	if (!ally->state.population_combat) return 0;
 	if (ally->pop.companion_owner != 0) return 0; // nostalRE: picks its targets around its owner
+	if (population_party_holds(ally)) return 0; // nostalRE: at its party's camp
 	if (!ally->state.active || ally->state.warping) return 0;
 	if (status_isdead(*ally)) return 0;
 	// Only share with idle shells (no current target).
@@ -376,6 +379,47 @@ static int32 pop_ally_status_scan_cb(block_list *bl, va_list ap)
 	return 0;
 }
 
+/// nostalRE: scan callback: finds a dead ally (ally_dead), for Resurrection.
+static int32 pop_ally_dead_scan_cb(block_list *bl, va_list ap)
+{
+	map_session_data *ally = BL_CAST(BL_PC, bl);
+	if (!ally) return 0;
+	PopAllySearchCtx *ctx = va_arg(ap, PopAllySearchCtx*);
+	if (ally->id == ctx->shell->id) return 0;
+	if (pop_companion_ignores_ally(ctx->shell, ally)) return 0;
+	if (!ally->state.population_combat
+	    && !population_engine_arena_is_ally(ctx->shell, ally))
+		return 0;
+	if (!ally->state.active || ally->state.warping) return 0;
+	if (!pc_isdead(ally)) return 0;
+	ctx->result = ally;
+	return 1; // take the first one
+}
+
+/// nostalRE: scan callback: finds the living ally with the lowest SP% below hp_threshold (ally_sp_below) who
+/// would gain from Soul Exchange, which in Renewal leaves the target with half the caster's SP.
+static int32 pop_ally_sp_scan_cb(block_list *bl, va_list ap)
+{
+	map_session_data *ally = BL_CAST(BL_PC, bl);
+	if (!ally) return 0;
+	PopAllySearchCtx *ctx = va_arg(ap, PopAllySearchCtx*);
+	if (ally->id == ctx->shell->id) return 0;
+	if (pop_companion_ignores_ally(ctx->shell, ally)) return 0;
+	if (!ally->state.population_combat
+	    && !population_engine_arena_is_ally(ctx->shell, ally))
+		return 0;
+	if (!ally->state.active || ally->state.warping) return 0;
+	if (status_isdead(*ally)) return 0;
+	if (ally->battle_status.max_sp == 0) return 0;
+	if (ally->battle_status.sp >= ctx->shell->battle_status.sp / 2) return 0;
+	const int pct = static_cast<int>(static_cast<uint64>(ally->battle_status.sp) * 100 / ally->battle_status.max_sp);
+	if (pct < ctx->hp_threshold && pct < ctx->best_hp_pct) {
+		ctx->best_hp_pct = pct;
+		ctx->result = ally;
+	}
+	return 0;
+}
+
 /// Scan callback: finds any living nearby ally (for Always-condition ally casts).
 static int32 pop_ally_any_scan_cb(block_list *bl, va_list ap)
 {
@@ -437,6 +481,12 @@ static map_session_data* population_shell_find_ally_target(
 	switch (cond) {
 	case C::AllyHpBelow:
 		map_foreachinrange(pop_ally_hp_scan_cb, sd, scan_range, BL_PC, &ctx);
+		break;
+	case C::AllyDead: // nostalRE
+		map_foreachinrange(pop_ally_dead_scan_cb, sd, scan_range, BL_PC, &ctx);
+		break;
+	case C::AllySpBelow: // nostalRE
+		map_foreachinrange(pop_ally_sp_scan_cb, sd, scan_range, BL_PC, &ctx);
 		break;
 	case C::AllyStatus:
 		ctx.want_has_status = true;
@@ -567,6 +617,16 @@ bool population_shell_skill_condition_ok(
 		ctx.best_hp_pct  = 101;
 		ctx.result       = nullptr;
 		map_foreachinrange(pop_ally_hp_scan_cb, sd, 9, BL_PC, &ctx);
+		return ctx.result != nullptr;
+	}
+	case C::AllyDead:      // nostalRE
+	case C::AllySpBelow: { // nostalRE
+		PopAllySearchCtx ctx{};
+		ctx.shell        = sd;
+		ctx.hp_threshold = cond_value_num;
+		ctx.best_hp_pct  = 101;
+		ctx.result       = nullptr;
+		map_foreachinrange(cond == C::AllyDead ? pop_ally_dead_scan_cb : pop_ally_sp_scan_cb, sd, 9, BL_PC, &ctx);
 		return ctx.result != nullptr;
 	}
 	case C::AllyStatus:
@@ -1209,7 +1269,8 @@ static bool population_shell_cast_expired_self_buffs(map_session_data *sd, t_tic
 		const int sp_cost = skill_get_sp(bs.skill_id, use_lv);
 		if (sp_cost > 0 && sp_cost > sd->battle_status.sp)
 			continue;
-		if (sp_floor > 0 && sp_cost > 0 &&
+		// nostalRE: not for Health Conversion, which is how a Professor left under the floor by Soul Exchange gets its SP back
+		if (sp_floor > 0 && sp_cost > 0 && bs.skill_id != PF_HPCONVERSION &&
 		    static_cast<uint32>(sd->battle_status.sp) - static_cast<uint32>(sp_cost) < sp_floor)
 			continue;
 
@@ -1385,6 +1446,8 @@ static bool population_shell_cast_ally_attack_skill(map_session_data *sd, t_tick
 			used = unit_skilluse_id(sd, ally->id, sk.skill_id, sk.skill_lv);
 
 		if (used) {
+			if (sd->pop.party_group != 0)
+				sd->pop.party_helps++; // nostalRE: @populate parties
 			if (sk.cooldown_ms > 0)
 				sd->pop.skill_next_use_tick[sk.skill_id] = current_tick + static_cast<t_tick>(sk.cooldown_ms);
 			// Set skill_cd from actual cast + after-cast delay (same as population_shell_try_attack)
@@ -1560,7 +1623,7 @@ static void population_shell_combat_process_tick(map_session_data *sd, t_tick cu
 
 	// --- PAI::TargetSwitch ---
 	// If a closer enemy exists than the current target, switch to it.
-	if ((pai & PAI::TargetSwitch) && pe.companion_owner == 0 && pe.target_id != 0 && !sd->pop.mob_tracker.tracked_mobs.empty()) {
+	if ((pai & PAI::TargetSwitch) && pe.companion_owner == 0 && !population_party_holds(sd) && pe.target_id != 0 && !sd->pop.mob_tracker.tracked_mobs.empty()) {
 		int cur_dist = 999;
 		block_list *cur_bl = map_id2bl(static_cast<int>(pe.target_id));
 		if (cur_bl) cur_dist = distance_bl(sd, cur_bl);
@@ -1595,7 +1658,7 @@ static void population_shell_combat_process_tick(map_session_data *sd, t_tick cu
 	// Role: Tank — intercept mobs targeting nearby allies.
 	// When idle (no current target), scan for mobs within 12 cells that are attacking a shell ally.
 	// Redirecting aggro keeps squishier support/attacker shells safer.
-	if (shell_role == PopulationRoleType::Tank && pe.companion_owner == 0 && tid_refreshed == 0) {
+	if (shell_role == PopulationRoleType::Tank && pe.companion_owner == 0 && !population_party_holds(sd) && tid_refreshed == 0) {
 		PopTankInterceptCtx tic{ sd, 0 };
 		map_foreachinrange(pop_tank_intercept_cb, sd, 12, BL_MOB, &tic);
 		if (tic.result_id != 0) {
@@ -1609,7 +1672,8 @@ static void population_shell_combat_process_tick(map_session_data *sd, t_tick cu
 
 	// Role: Support — if any nearby ally is below 50% HP, halt and let heal/buff CDs fire.
 	// If the ally is more than 3 cells away, walk toward them first.
-	if (shell_role == PopulationRoleType::Support && tid == 0) {
+	// nostalRE: not at a party's camp, where its members come to it
+	if (shell_role == PopulationRoleType::Support && tid == 0 && !population_party_holds(sd)) {
 		PopAllySearchCtx hctx{};
 		hctx.shell        = sd;
 		hctx.hp_threshold = 50;
@@ -1761,7 +1825,8 @@ static void population_shell_combat_process_tick(map_session_data *sd, t_tick cu
 	}
 
 	// nostalRE: a companion does not roam or look for mobs of its own; its follow step runs after this tick.
-	if (pe.companion_owner != 0)
+	// Nor does a party member at its camp (population_party.cpp).
+	if (pe.companion_owner != 0 || population_party_holds(sd))
 		return;
 
 	// Guard behavior: when idle (no target, not walking) return to spawn position.
@@ -1922,10 +1987,15 @@ static void population_shell_push_attack_skill_candidate(map_session_data *sd, u
 	out.push_back(row);
 }
 
-/// nostalRE: the skill list a shell plays from: its personality build's skill set (SkillSet:), else its
-/// job's, else its base job's.
+/// nostalRE: the skill list a shell plays from: its party slot's skill set, else its personality build's
+/// (SkillSet:), else its job's, else its base job's.
 static const std::vector<s_pop_skill_entry> *population_shell_skill_entries(const map_session_data *sd, uint16_t base_job)
 {
+	if (!sd->pop.party_skill_set.empty()) {
+		const std::vector<s_pop_skill_entry> *set = population_skill_db().find_set(sd->pop.party_skill_set);
+		if (set != nullptr && !set->empty())
+			return set;
+	}
 	if (sd->pop.build != nullptr && !sd->pop.build->skill_set.empty()) {
 		const std::vector<s_pop_skill_entry> *set = population_skill_db().find_set(sd->pop.build->skill_set);
 		if (set != nullptr && !set->empty())
@@ -2537,6 +2607,14 @@ int population_engine_combat_per_tick(map_session_data *sd, bool do_skills)
 			if (DIFF_TICK(gettick(), pe.last_move) > 3000)
 				sd->ud.canmove_tick = gettick();
 		}
+		population_shell_status_checkmapchange(sd);
+		return 0;
+	}
+
+	// nostalRE: a party member does its duty (db/population_party.yml); a roamer out hunting plays on below
+	if (pe.party_group != 0 && population_party_member_tick(sd, current_tick, do_skills)) {
+		if (DIFF_TICK(gettick(), pe.last_move) > 3000)
+			sd->ud.canmove_tick = gettick();
 		population_shell_status_checkmapchange(sd);
 		return 0;
 	}

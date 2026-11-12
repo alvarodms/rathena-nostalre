@@ -10,11 +10,13 @@
 #include "config/population_config.cpp"
 #include "config/population_skill_db.cpp"
 #include "config/population_personality_db.cpp" // nostalRE
+#include "config/population_party_db.cpp" // nostalRE: after the personality db, whose node helpers it uses
 #include "config/population_spawn_db.cpp"
 #include "runtime/population_engine_combat.cpp"
 #include "runtime/population_engine_path.cpp"
 #include "runtime/population_shell_ammo.cpp"
 #include "runtime/population_shell_runtime.cpp"
+#include "runtime/population_party.cpp" // nostalRE: after the combat and runtime units it calls into
 // Expanded conditions parser MUST come after combat.cpp so the LegacyPredicate
 // forward declaration in predicates.hpp can resolve population_shell_skill_condition_ok.
 #include "expanded_ai/expanded_parser.cpp"

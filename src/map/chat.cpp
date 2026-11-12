@@ -20,6 +20,7 @@
 #include "npc.hpp" // npc_event_do()
 #include "pc.hpp"
 #include "pc_groups.hpp"
+#include "population_engine.hpp" // nostalRE
 
 int32 chat_triggerevent(chat_data *cd); // forward declaration
 
@@ -178,6 +179,9 @@ int32 chat_joinchat(map_session_data* sd, int32 chatid, const char* pass)
 		achievement_update_objective(map_id2sd(cd->owner->id), AG_CHATTING_COUNT, 1, cd->users);
 
 	chat_triggerevent(cd); //Event
+
+	if (cd->owner->type == BL_PC)
+		population_engine_on_chat_join(*sd, cd->owner->id); // nostalRE: a shell party's leader answers
 
 	return 0;
 }

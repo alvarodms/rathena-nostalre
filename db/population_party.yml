@@ -1,0 +1,147 @@
+# This file is a part of rAthena.
+#   Copyright(C) 2021 rAthena Development Team
+#   https://rathena.org - https://github.com/rathena
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+###########################################################################
+# Population Engine Party Database (nostalRE)
+###########################################################################
+#
+# Shells that play as a party, on the maps listed here. A party is a tactic and its slots;
+# a map entry says which parties the map holds. Switch: population_engine_parties.
+#
+# A party takes its members out of the map's shells (db/population_spawn.yml): as the map
+# fills, the spawner gives shells to the parties until they are full. A party on a map with
+# few shells stays short of members.
+#
+#   - Party:         Name.
+#     Tactic:        camp -- a leader on a spot of the map, the party around them. (Default: camp)
+#     Camp:          { Radius: cells from the camp spot its members stand within (Default: 4),
+#                      Defend: members at the camp fight monsters attacking a member this close
+#                              to it, and nothing else (Default: 10),
+#                      Sit:    members with nothing to cast sit down (Default: true) }
+#     Recruit:       Chat room titles for the leader. {map} is the map's name, {level} its
+#                    monsters' level rounded down to a five. (Default: none)
+#     RecruitChance: Percent of parties whose leader opens one. A leader in a chat room casts
+#                    nothing, so their party has a support. (Default: 0)
+#     Respawn:       [min, max] seconds a member killed out of the healer's sight lies there
+#                    before it gets up at the camp, as a player back from town. One killed in
+#                    the healer's sight waits for Resurrection instead. (Default: [15, 30])
+#     Slots:         The places in the party, each with a duty:
+#       - Duty:      anchor    -- the leader, on the camp spot. One per party (the first anchor
+#                                 slot). A leader who heals and has no chat room is its
+#                                 party's support as well.
+#                    support   -- stays by the leader; its heals, buffs and Resurrection are
+#                                 for the party's members only.
+#                    roamer    -- hunts around the camp, comes back to be healed and buffed,
+#                                 leaves again.
+#                    performer -- a Bard or Dancer at the camp, with Partner on the next cell
+#                                 (ensembles need the two side by side).
+#                    battery   -- a Professor at the camp: Soul Exchange for members low on SP.
+#         Jobs:      { JobName: weight } -- names as in population_engine.yml.
+#         Count:     How many, or [min, max]. (Default: 1; support: 0, raised to 1 when the
+#                    leader is no support)
+#         Chance:    Percent of parties that have the slot. (Default: 100)
+#         Partner:   performer: the job standing next to it; the two come together or not at all.
+#         SkillSet:  A Name: in population_skill_db.yml, taken by the members whose class it
+#                    was written for. (Default: their build's or job's)
+#         PartnerSkillSet: The same for the Partner.
+#         Build:     A Build: in population_personality.yml, taken by the members it is for.
+#                    (Default: rolled)
+#         roamers only:
+#         Roam:      Cells from the camp it hunts within. (Default: 40)
+#         Return:    { HpBelow: 40, SpBelow: 15, Unbuffed: true, After: [min, max] } -- it goes
+#                    back to the camp below this % HP at once, and once its fight is over below
+#                    this % SP, when Blessing and Increase Agility it left with have run out,
+#                    or after this many seconds out. (Default: as shown, no After)
+#         Leave:     { HpAbove: 90, SpAbove: 60, Wait: [10, 30] } -- it leaves again from this
+#                    % HP and SP, buffed when a healer is at the camp, or after waiting this
+#                    many seconds. (Default: as shown)
+#
+#   - Map:           Map name.
+#     Parties:       { PartyName: count } -- how many of each, scaled by
+#                    population_engine_density_pct like the shells they are made of.
+#     Camps:         [[x, y], ...] -- camp spots, taken in order. (Default: by one of the map's
+#                    warps, where parties used to gather, 30 cells from the next camp)
+#     Chance:        { duty: percent } -- instead of the slots' Chance on this map, for maps
+#                    where every party had songs or no party had a Professor.
+#
+# Classes fit the map (population_engine_map_levels): on a map too low for a class the slot
+# gets the class below it (Priest to Acolyte, Knight to Swordsman, then Novice). A performer or
+# battery slot is left out there, and so is a support who would be a Novice.
+# @populate parties lists the parties on your map. Reload with @reloadpopenginedb; parties on
+# the map keep what they were made from.
+###########################################################################
+
+Header:
+  Type: POPULATION_PARTY_DB
+  Version: 1
+
+Body:
+
+  # The leveling party of a field: the leader recruiting at the camp, a priest by them,
+  # killers coming and going.
+  - Party: camp_leveling
+    Tactic: camp
+    Camp: { Radius: 4, Defend: 10, Sit: true }
+    Recruit:
+      - "LF> party {map} {level}+"
+      - "{map} PT {level}+ need killers"
+      - "PT {level}+ heal + buffs"
+      - "LF> members {map}"
+    RecruitChance: 50
+    Respawn: [15, 30]
+    Slots:
+      - Duty: anchor
+        Jobs: { Priest: 4, HighPriest: 1, Knight: 2, Crusader: 1, Wizard: 1, Hunter: 1 }
+        SkillSet: priest_camp
+        Build: priest_support
+      - Duty: support
+        Jobs: { Priest: 4, HighPriest: 1 }
+        SkillSet: priest_camp
+        Build: priest_support
+      - Duty: roamer
+        Jobs: { Knight: 3, Hunter: 3, Wizard: 2, Assassin: 2, Crusader: 1, Monk: 1, Rogue: 1, Blacksmith: 1 }
+        Count: [3, 5]
+        Roam: 40
+        Return: { HpBelow: 45, SpBelow: 15, Unbuffed: true, After: [120, 300] }
+        Leave: { HpAbove: 90, SpAbove: 60, Wait: [10, 30] }
+      - Duty: performer
+        Jobs: { Bard: 1 }
+        Partner: Dancer
+        SkillSet: bard_camp
+        PartnerSkillSet: dancer_camp
+        Chance: 35
+      - Duty: battery
+        Jobs: { Professor: 1 }
+        SkillSet: professor_battery
+        Chance: 25
+
+###########################################################################
+# Maps
+###########################################################################
+
+  # Veins Field 03 (Magmarings): the party map, songs and SP more often than not.
+  - Map: ve_fild03
+    Parties: { camp_leveling: 2 }
+    Chance: { performer: 70, battery: 50 }
+
+  # Geffen Field 06 (Petites).
+  - Map: gef_fild06
+    Parties: { camp_leveling: 1 }
+
+  # Sograt Desert 17 (Hodes, Sandmen).
+  - Map: moc_fild17
+    Parties: { camp_leveling: 1 }
