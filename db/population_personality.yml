@@ -1,0 +1,149 @@
+# This file is a part of rAthena.
+#   Copyright(C) 2021 rAthena Development Team
+#   https://rathena.org - https://github.com/rathena
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+###########################################################################
+# Population Engine Personality Database (nostalRE)
+###########################################################################
+#
+# Each autosummoned shell gets a personality at spawn: a build and a temperament,
+# rolled apart, so a few entries make many different players.
+#
+# A Build is what a player made of their class. It links to the other files:
+#   - Build:         Name (shown by @populate levels as build/temperament).
+#     Jobs:          { JobName: weight } -- the jobs it is for. A job with builds always takes
+#                    one of them, by weight; a job with none keeps its population_engine.yml
+#                    entry. Names as in population_engine.yml (Knight, HighPriest, "Lord Knight").
+#     SkillSet:      A Name: in population_skill_db.yml. (Default: the job's own skills)
+#     GearSet:       A GearSetName: in population_gear_sets.yml. (Default: the job's gear)
+#     Stats:         { Str: [min, max], Agi: ..., Vit, Int, Dex, Luk } -- before the shell's level
+#                    fits them (population_engine_map_levels). (Default: the job's)
+#     Names:         A profile in population_names.yml. (Default: the job's)
+#     Chat:          A profile in population_chat.yml. (Default: the job's)
+#     MeleeWeight:   How much a basic attack appeals, in percent of a skill with Rate 10000.
+#                    (Default: by weapon: staves and books 10, bows, guns, instruments and
+#                    whips 70, the rest 80)
+#     Prefers:       { kind: percent } -- weighs the scored picker's kinds: damage, aoe, heal,
+#                    buff, debuff, defend, escape, melee. (Default: 100 each)
+#     Temperaments:  { name: weight } -- the temperaments it can take. (Default: all, by their
+#                    Weight)
+#
+# A Temperament is how they play, whatever their class:
+#   - Temperament:   Name.
+#     Weight:        Against the other temperaments, for builds that list none. (Default: 1)
+#     ReactionMs:    [min, max] -- rolled once per shell: how long it takes to act when a fight
+#                    starts (each time give or take a third). It also stops the instant
+#                    reaction to being hit. (Default: 0)
+#     Precision:     [min, max] -- rolled once per shell: % of its choices that are its best
+#                    one, and of incoming casts it dodges. (Default: 100)
+#     Pauses:        { Every: [min, max], For: [min, max] } in seconds -- after a kill it now and
+#                    then stands around this long; a hit ends it. (Default: none)
+#     Prefers:       As for a build; the two multiply.
+#
+# Prefers, Precision and MeleeWeight count only with population_engine_scored_skills on.
+# Reload with @reloadpopenginedb; shells keep the personality they spawned with.
+###########################################################################
+
+Header:
+  Type: POPULATION_PERSONALITY_DB
+  Version: 1
+
+Body:
+
+###########################################################################
+# Temperaments
+###########################################################################
+
+  - Temperament: steady
+    Weight: 4
+    ReactionMs: [300, 600]
+    Precision: [75, 90]
+    Pauses: { Every: [60, 180], For: [3, 10] }
+
+  - Temperament: careful
+    Weight: 2
+    ReactionMs: [450, 900]
+    Precision: [80, 95]
+    Pauses: { Every: [40, 120], For: [5, 15] }
+    Prefers: { defend: 150, escape: 150, heal: 130, aoe: 80 }
+
+  - Temperament: reckless
+    Weight: 2
+    ReactionMs: [200, 400]
+    Precision: [50, 70]
+    Prefers: { damage: 120, aoe: 130, defend: 50, escape: 50 }
+
+  - Temperament: afk_farmer
+    Weight: 1
+    ReactionMs: [600, 1200]
+    Precision: [60, 80]
+    Pauses: { Every: [20, 60], For: [10, 40] }
+    Prefers: { buff: 70 }
+
+###########################################################################
+# Builds
+###########################################################################
+
+  # Priests: most heal and buff from behind with a staff; some melee with a mace.
+  - Build: priest_support
+    Jobs: { Priest: 3, HighPriest: 3 }
+    MeleeWeight: 10
+    Prefers: { heal: 130, buff: 120 }
+
+  - Build: priest_battle
+    Jobs: { Priest: 1, HighPriest: 1 }
+    SkillSet: priest_battle
+    GearSet: para_battle_priest
+    Stats: { Str: [50, 80], Agi: [30, 60], Vit: [30, 50], Int: [30, 50], Dex: [30, 50], Luk: [1, 10] }
+    MeleeWeight: 85
+    Temperaments: { steady: 2, reckless: 2, careful: 1 }
+
+  # Wizards: area spells on crowds, or bolts matched to the monster's element.
+  - Build: wizard_aoe
+    Jobs: { Wizard: 3, HighWizard: 3 }
+    MeleeWeight: 5
+    Prefers: { aoe: 140 }
+
+  - Build: wizard_bolter
+    Jobs: { Wizard: 2, HighWizard: 2 }
+    SkillSet: wizard_bolter
+    MeleeWeight: 5
+    Prefers: { damage: 130, aoe: 60 }
+
+  # Knights: a two-handed sword with Quicken and Bash, or a spear and a shield.
+  - Build: knight_twohand
+    Jobs: { Knight: 2, LordKnight: 2 }
+    SkillSet: knight_twohand
+    Stats: { Str: [70, 99], Agi: [50, 80], Vit: [20, 40], Dex: [30, 50], Luk: [1, 20] }
+    MeleeWeight: 90
+
+  - Build: knight_spear
+    Jobs: { Knight: 1, LordKnight: 1 }
+    GearSet: para_knight_spear
+    Stats: { Str: [70, 90], Agi: [10, 30], Vit: [50, 80], Dex: [30, 50], Luk: [1, 10] }
+    MeleeWeight: 60
+    Temperaments: { steady: 2, careful: 2, afk_farmer: 1 }
+
+  # Hunters: traps and a falcon, or arrows only.
+  - Build: hunter_trapper
+    Jobs: { Hunter: 1, Sniper: 1 }
+    Prefers: { aoe: 120 }
+
+  - Build: hunter_archer
+    Jobs: { Hunter: 2, Sniper: 2 }
+    SkillSet: hunter_archer
+    Stats: { Str: [20, 40], Agi: [70, 99], Dex: [70, 99], Luk: [1, 30] }
+    MeleeWeight: 70

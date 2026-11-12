@@ -19,6 +19,8 @@
 #include "population_engine_core.hpp"
 
 namespace expanded_ai { class ExpandedCondition; }
+struct PopBuild;       // nostalRE: population_personality_db.hpp
+struct PopTemperament;
 
 /// One offensive skill the population shell may rotate through (seeded from the PC skill tree or
 /// population_skill_db.yml).  condition / cond_* mirror PopSkillCondition from population_skill_db.hpp
@@ -35,6 +37,7 @@ struct PopulationShellCombatSkill {
 	uint8_t  around_range = 0;  ///< If >0, place ground/trap skills at a random cell within this radius of the shell
 	bool     around_target = false; ///< When true, around_range centres on the enemy (mob_skill_db around5-8); when false (default), on self (around1-4)
 	uint32_t cooldown_ms  = 0;  ///< Per-skill cooldown in ms after a successful cast (0 = no individual cooldown)
+	uint8_t  kind = 0;             ///< nostalRE: PopSkillKind (YAML Kind:), for the scored picker
 	std::shared_ptr<expanded_ai::ExpandedCondition> expanded; ///< Set iff condition == Expanded; evaluated in lieu of the flat condition fields.
 };
 
@@ -51,6 +54,7 @@ struct PopulationShellBuffSkill {
 	uint8_t  around_range = 0;   ///< If >0, place ground/trap skills at a random cell within this radius of the shell
 	bool     around_target = false; ///< When true, around_range centres on the enemy (mob_skill_db around5-8); when false (default), on self (around1-4)
 	uint32_t cooldown_ms  = 0;   ///< Per-skill cooldown in ms after a successful cast (0 = no individual cooldown)
+	uint8_t  kind = 0;             ///< nostalRE: PopSkillKind (YAML Kind:), for the scored picker
 	std::shared_ptr<expanded_ai::ExpandedCondition> expanded; ///< Set iff condition == Expanded; evaluated in lieu of the flat condition fields.
 };
 
@@ -185,6 +189,23 @@ struct s_population {
 	int16  companion_seen_y = -1;
 	t_tick companion_react_at = 0;  ///< Shell: when it reacts to the owner's move (0 = nothing to react to).
 	t_tick companion_next_shuffle = 0; ///< Shell: when it may take a step while its owner stands still.
+
+	// --- nostalRE: personality (db/population_personality.yml), rolled at spawn ---
+	std::shared_ptr<const PopBuild> build;             ///< what it made of its class (nullptr: the job's own)
+	std::shared_ptr<const PopTemperament> temperament; ///< how it plays (nullptr: no file, plays as before)
+	std::array<uint16_t, 9> prefers{ 100, 100, 100, 100, 100, 100, 100, 100, 100 }; ///< % per PopSkillKind, build × temperament
+	bool     melee_chosen = false;      ///< its last choice was a basic attack: it keeps swinging until the next one
+	int16_t  melee_weight = -1;         ///< % score of a basic attack (-1: by weapon)
+	uint16_t reaction_ms = 0;           ///< its usual delay before acting on something new
+	uint8_t  precision = 100;           ///< % of choices that are its best one
+	t_tick   react_until = 0;           ///< acts on its new target from then
+	t_tick   pause_until = 0;           ///< idle pause: stands still until then
+	t_tick   pause_from = 0;            ///< when the idle pause began (a hit after it ends the pause)
+	t_tick   next_pause_at = 0;         ///< when the next idle pause starts (0: none planned)
+	t_tick   panic_roll_until = 0;      ///< a missed dodge stays missed until then
+	uint32_t acts_skill = 0;            ///< skills it cast on enemies (@populate levels)
+	uint32_t acts_melee = 0;            ///< basic attacks it chose
+	uint32_t pauses = 0;                ///< idle pauses it took (@populate levels)
 
 	// --- Skill fail tracking ---
 	t_tick last_skill_fail    = 0;  ///< Tick of last failed skill use.

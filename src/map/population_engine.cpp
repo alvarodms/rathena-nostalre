@@ -108,6 +108,14 @@ static const std::string& population_engine_chat_profile_key(const PopulationEng
 	return kPopulationChatProfileDefault;
 }
 
+/// nostalRE: a shell's chat profile: its personality build's Chat:, else its job's.
+static const std::string& population_shell_chat_profile_key(const map_session_data* sd, const PopulationEngine* eq)
+{
+	if (sd != nullptr && sd->pop.build != nullptr && !sd->pop.build->chat.empty())
+		return sd->pop.build->chat;
+	return population_engine_chat_profile_key(eq);
+}
+
 static void population_engine_chat_replace_all(std::string& s, const char* needle, const std::string& repl) {
 	const size_t nlen = strlen(needle);
 	if (nlen == 0)
@@ -182,6 +190,94 @@ static int16_t population_roll_closed_range(int16_t a, int16_t b)
 		std::swap(a, b);
 	const uint32_t span = static_cast<uint32_t>(b - a) + 1u;
 	return static_cast<int16_t>(a + static_cast<int32_t>(rnd() % span));
+}
+
+// ---- nostalRE: personalities ----------------------------------------------
+// db/population_personality.yml: a build (gear, stats, names, chat, skill set for its class) and a
+// temperament (how it plays), rolled apart for each autosummoned shell.
+
+/// The job's population_engine.yml entry with the build laid over it: its gear set's pools, its stat
+/// ranges, its names and chat profile. A copy per shell, which the spawn reads and then drops; the
+/// compiled Script: stays the job entry's (~PopulationEngine frees it), so the copy lets go of it first.
+static std::shared_ptr<PopulationEngine> population_apply_build(const PopulationEngine& job_entry, const PopBuild& build)
+{
+	std::shared_ptr<PopulationEngine> entry(new PopulationEngine(job_entry), [](PopulationEngine* copy) {
+		copy->script = nullptr;
+		delete copy;
+	});
+	if (!build.gear_set.empty()) {
+		const PopulationGearSet* gs = population_shared_db().gear_set(build.gear_set);
+		if (gs == nullptr)
+			gs = population_engine_db().gear_set(build.gear_set);
+		if (gs != nullptr) {
+			entry->weapon_pool = gs->weapon_pool;
+			entry->shield_pool = gs->shield_pool;
+			entry->head_top_pool = gs->head_top_pool;
+			entry->head_mid_pool = gs->head_mid_pool;
+			entry->head_bottom_pool = gs->head_bottom_pool;
+			entry->armor_pool = gs->armor_pool;
+			entry->garment_pool = gs->garment_pool;
+			entry->shoes_pool = gs->shoes_pool;
+			entry->acc_l_pool = gs->acc_l_pool;
+			entry->acc_r_pool = gs->acc_r_pool;
+			entry->skip_arrow = gs->skip_arrow;
+		} else
+			ShowWarning("Population engine: build '%s' names unknown gear set '%s'; the job's gear is used.\n",
+				build.name.c_str(), build.gear_set.c_str());
+	}
+	int16_t* const ranges[] = { &entry->str_min, &entry->str_max, &entry->agi_min, &entry->agi_max,
+		&entry->vit_min, &entry->vit_max, &entry->intl_min, &entry->intl_max,
+		&entry->dex_min, &entry->dex_max, &entry->luk_min, &entry->luk_max };
+	for (size_t i = 0; i < build.stats.size(); i++)
+		if (build.stats[i] >= 0)
+			*ranges[i] = build.stats[i];
+	if (!build.names.empty())
+		entry->name_profile = build.names;
+	if (!build.chat.empty())
+		entry->chat_profile = build.chat;
+	return entry;
+}
+
+static int32_t population_roll_int(int32_t lo, int32_t hi)
+{
+	return hi > lo ? lo + static_cast<int32_t>(rnd() % static_cast<uint32_t>(hi - lo + 1)) : lo;
+}
+
+/// Gives a spawned shell its personality and rolls what the temperament leaves to chance.
+static void population_shell_take_personality(map_session_data* sd, const std::shared_ptr<const PopBuild>& build,
+	const std::shared_ptr<const PopTemperament>& temperament)
+{
+	static_assert(std::tuple_size<decltype(s_population::prefers)>::value == static_cast<size_t>(PopSkillKind::Count),
+		"s_population::prefers holds one percent per PopSkillKind");
+	s_population& pe = sd->pop;
+	pe.build = build;
+	pe.temperament = temperament;
+	for (size_t i = 0; i < pe.prefers.size(); i++) {
+		uint32_t pct = 100;
+		if (build != nullptr)
+			pct = pct * build->prefers[i] / 100;
+		if (temperament != nullptr)
+			pct = pct * temperament->prefers[i] / 100;
+		pe.prefers[i] = static_cast<uint16_t>(std::min<uint32_t>(pct, 10000));
+	}
+	pe.melee_weight = build != nullptr ? build->melee_weight : -1;
+	pe.reaction_ms = 0;
+	pe.precision = 100;
+	pe.next_pause_at = 0;
+	if (temperament != nullptr) {
+		pe.reaction_ms = static_cast<uint16_t>(std::clamp(population_roll_int(temperament->reaction_min, temperament->reaction_max), 0, 10000));
+		pe.precision = static_cast<uint8_t>(std::clamp(population_roll_int(temperament->precision_min, temperament->precision_max), 0, 100));
+		if (temperament->pause_every_max > 0)
+			pe.next_pause_at = gettick() + 1000 * population_roll_int(temperament->pause_every_min, temperament->pause_every_max);
+	}
+}
+
+/// "build/temperament", for @populate levels.
+static std::string population_shell_personality_name(const map_session_data* sd)
+{
+	const std::string build = sd->pop.build != nullptr ? sd->pop.build->name : "-";
+	const std::string temperament = sd->pop.temperament != nullptr ? sd->pop.temperament->name : "-";
+	return build + "/" + temperament;
 }
 
 // ---- nostalRE: map levels -------------------------------------------------
@@ -631,7 +727,7 @@ TIMER_FUNC(population_engine_chat_timer) {
 			pool = population_chat_db().lines_for_category("hunt");
 		// Fallback to profile pool.
 		if ((!pool || pool->empty()) && equipment)
-			pool = population_chat_db().pool_for_profile(population_engine_chat_profile_key(equipment.get()));
+			pool = population_chat_db().pool_for_profile(population_shell_chat_profile_key(raw_sd, equipment.get()));
 		if (pool == nullptr || pool->empty())
 			continue;
 
@@ -697,7 +793,7 @@ static bool population_engine_deliver_chat_reply_locked(map_session_data* bot_sd
 		std::shared_ptr<PopulationEngine> equipment = population_engine_db_for_shell(bot_sd).find(bot_sd->status.class_);
 		if (equipment == nullptr)
 			return false;
-		pool = population_chat_db().pool_for_profile(population_engine_chat_profile_key(equipment.get()));
+		pool = population_chat_db().pool_for_profile(population_shell_chat_profile_key(bot_sd, equipment.get()));
 	}
 	if (!pool || pool->empty())
 		return false;
@@ -1200,6 +1296,16 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 			}
 		}
 
+		// nostalRE: a personality: a build for this class (its gear, stats, names) and a temperament.
+		// Vendors keep their entry; they get a temperament all the same.
+		std::shared_ptr<const PopBuild> build;
+		std::shared_ptr<const PopTemperament> temperament;
+		population_personality_db().roll(job_id, build, temperament);
+		if (build != nullptr && equipment != nullptr && !is_vendor_spawn)
+			equipment = population_apply_build(*equipment, *build);
+		else
+			build = nullptr; // nothing to lay it over (no population_engine.yml entry), or a vendor
+
 		// Gender (job-locked wins; then YAML Sex; else random).
 		char sex;
 		const char required_sex = get_job_required_sex(job_id);
@@ -1268,6 +1374,7 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 
 		if (sd) {
 			sd->pop.spawn_job = pre_job_id; // nostalRE: the quota counts this, not a stepped-down class
+			population_shell_take_personality(sd, build, temperament); // nostalRE
 			g_population_engine_pcs.push_back(sd);
 			g_population_engine_count++;
 			g_population_engine_stats.total_created++;
@@ -1756,7 +1863,7 @@ void population_engine_on_shell_kills_player(map_session_data *killer_sd, map_se
 		// Fallback: find the shell's profile pool.
 		std::shared_ptr<PopulationEngine> equipment = population_engine_db_for_shell(killer_sd).find(killer_sd->status.class_);
 		if (equipment)
-			pool = population_chat_db().pool_for_profile(population_engine_chat_profile_key(equipment.get()));
+			pool = population_chat_db().pool_for_profile(population_shell_chat_profile_key(killer_sd, equipment.get()));
 	}
 	if (!pool || pool->empty())
 		return;
@@ -1805,6 +1912,9 @@ void do_init_population_engine_load_databases() {
 		ShowWarning("Population engine: population_chat.yml missing or invalid; chat disabled until fixed.\n");
 	if (!population_skill_db().load())
 		ShowWarning("Population engine: population_skill_db.yml missing or invalid; no per-job skill overrides loaded.\n");
+	// nostalRE: after the skill db, whose skill sets the builds name
+	if (!population_personality_db().load())
+		ShowWarning("Population engine: population_personality.yml missing or invalid; shells play without personalities.\n");
 	// Shared templates DB MUST load before the three job DBs so GearSet/Profile
 	// references in the job files can resolve via fallback lookup.
 	if (!population_shared_db().load())
@@ -1906,6 +2016,13 @@ bool population_engine_reload_equipment(uint32_t *out_entry_count)
 		ShowStatus("Population engine: population_skill_db.yml reloaded (%zu jobs).\n", population_skill_db().job_count());
 	else
 		ShowWarning("Population engine: population_skill_db.yml reload failed (missing or invalid).\n");
+
+	// nostalRE: personalities name skill sets, so after the skill db. Shells keep the one they rolled.
+	if (population_personality_db().reload())
+		ShowStatus("Population engine: population_personality.yml reloaded (%zu builds, %zu temperaments).\n",
+			population_personality_db().build_count(), population_personality_db().temperament_count());
+	else
+		ShowWarning("Population engine: population_personality.yml reload failed (missing or invalid).\n");
 
 	const bool chat_re = population_chat_db().reload();
 	if (chat_re)
@@ -3921,11 +4038,13 @@ void population_engine_report_levels(int fd, int16_t map_id)
 			safesnprintf(job, sizeof(job), "%s(from %s)", job_name(psd->status.class_), job_name(quota_job));
 		else
 			safestrncpy(job, job_name(psd->status.class_), sizeof(job));
-		safesnprintf(msg, sizeof(msg), "shell job %s lv %d/%d stats %d/%d/%d/%d/%d/%d weapon %u armor %u shoes %u hp %u/%u %s",
+		safesnprintf(msg, sizeof(msg), "shell job %s lv %d/%d stats %d/%d/%d/%d/%d/%d weapon %u armor %u shoes %u hp %u/%u %s %s react %u prec %u acts %u/%u pauses %u",
 			job, psd->status.base_level, psd->status.job_level,
 			psd->status.str, psd->status.agi, psd->status.vit, psd->status.int_, psd->status.dex, psd->status.luk,
 			worn(EQI_HAND_R), worn(EQI_ARMOR), worn(EQI_SHOES),
-			psd->status.hp, psd->status.max_hp, population_engine_shell_is_mortal(psd) ? "mortal" : "immortal");
+			psd->status.hp, psd->status.max_hp, population_engine_shell_is_mortal(psd) ? "mortal" : "immortal",
+			population_shell_personality_name(psd).c_str(), psd->pop.reaction_ms, psd->pop.precision,
+			psd->pop.acts_skill, psd->pop.acts_melee, psd->pop.pauses);
 		clif_displaymessage(fd, msg);
 	}
 }

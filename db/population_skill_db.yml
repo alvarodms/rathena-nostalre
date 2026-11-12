@@ -2196,3 +2196,69 @@ Body:
       - { SkillId: SC_INVISIBILITY,    Level: 5,  Rate: 5000, Target: self }
       - { SkillId: SC_INVISIBILITY,    Level: 5,  Rate: 8000, Target: self, Condition: self_targeted }
       - { SkillId: SC_ESCAPE,          Level: 5,  Rate: 5000, Target: self, Condition: hp_below, CondValue: 25 }
+
+  ###########################################################################
+  # nostalRE: named skill sets for personality builds (db/population_personality.yml SkillSet:).
+  # A Name: keeps the entry out of its job's default; JobId says whose skills they are.
+  # Kind: (damage, aoe, heal, buff, debuff, defend, escape) tells the scored picker what a
+  # skill is for when it can't tell by itself; Rate is then the skill's weight.
+  ###########################################################################
+
+  # Priest who melees with a mace: buffs itself, heals when it has to, holy damage on undead.
+  - Name: priest_battle
+    JobId: 8
+    Skills:
+      - { SkillId: AL_BLESSING,   Level: 10, Target: self, Condition: not_self_status, CondValue: SC_BLESSING }
+      - { SkillId: AL_INCAGI,     Level: 10, Target: self, Condition: not_self_status, CondValue: SC_INCREASEAGI }
+      - { SkillId: AL_ANGELUS,    Level: 10, Target: self, Condition: not_self_status, CondValue: SC_ANGELUS }
+      - { SkillId: PR_KYRIE,      Level: 10, Target: self, Condition: not_self_status, CondValue: SC_KYRIE }
+      - { SkillId: PR_IMPOSITIO,  Level: 5,  Target: self, Condition: not_self_status, CondValue: SC_IMPOSITIO }
+      - { SkillId: AL_HEAL,       Level: 10, Target: self, Condition: hp_below, CondValue: 45 }
+      - { SkillId: AL_HEAL,       Level: 10, Target: ally, Condition: ally_hp_below, CondValue: 50 }
+      - { SkillId: PR_TURNUNDEAD, Level: 10, Rate: 6000, Condition: enemy_element, CondValue: Undead }
+      - { SkillId: AL_HOLYLIGHT,  Level: 1,  Rate: 3000 }
+      - { SkillId: AL_DECAGI,     Level: 10, Rate: 1500, Kind: debuff, Condition: not_enemy_status, CondValue: SC_DECREASEAGI }
+
+  # Wizard who bolts one monster at a time: the element picks the bolt.
+  - Name: wizard_bolter
+    JobId: 9
+    Skills:
+      - { SkillId: MG_FIREBOLT,      Level: 10 }
+      - { SkillId: MG_COLDBOLT,      Level: 10 }
+      - { SkillId: MG_LIGHTNINGBOLT, Level: 10 }
+      - { SkillId: WZ_EARTHSPIKE,    Level: 5,  Rate: 9000 }
+      - { SkillId: MG_SOULSTRIKE,    Level: 10, Rate: 7000 }
+      - { SkillId: WZ_JUPITEL,       Level: 10, Rate: 8000 }
+      - { SkillId: MG_FROSTDIVER,    Level: 10, Rate: 5000, Cooldown: 1500, Condition: not_enemy_status, CondValue: SC_FREEZE }
+      - { SkillId: WZ_FROSTNOVA,     Level: 10, Rate: 6000, Kind: defend, Condition: melee_attacked }
+      - { SkillId: MG_ENERGYCOAT,    Level: 1,  Target: self, Condition: not_self_status, CondValue: SC_ENERGYCOAT }
+      - SkillId: MG_SAFETYWALL
+        Level: 10
+        Target: self
+        Cooldown: 7000
+        Condition:
+          AND:
+            - not_self_safetywall
+            - melee_attacked
+
+  # Knight with a two-handed sword: Quicken up, Bash and Bowling Bash, Magnum Break on a crowd.
+  - Name: knight_twohand
+    JobId: 7
+    Skills:
+      - { SkillId: KN_TWOHANDQUICKEN, Level: 10, Target: self, Condition: not_self_status, CondValue: SC_TWOHANDQUICKEN }
+      - { SkillId: SM_ENDURE,         Level: 10, Target: self, Condition: not_self_status, CondValue: SC_ENDURE }
+      - { SkillId: SM_BASH,           Level: 10, Rate: 8000 }
+      - { SkillId: KN_BOWLINGBASH,    Level: 10, Rate: 9000 }
+      - { SkillId: SM_MAGNUM,         Level: 10, Rate: 7000, Condition: enemy_count_nearby, CondValue: 3 }
+      - { SkillId: KN_AUTOCOUNTER,    Level: 5,  Rate: 9000, Target: self, Condition: damaged_gt, CondValue: 20, Cooldown: 4000 }
+
+  # Hunter who shoots: Double Strafe, Arrow Shower on a crowd, falcon now and then, no traps.
+  - Name: hunter_archer
+    JobId: 11
+    Skills:
+      - { SkillId: AC_CONCENTRATION, Level: 10, Target: self, Condition: not_self_status, CondValue: SC_CONCENTRATE }
+      - { SkillId: AC_DOUBLE,        Level: 10 }
+      - { SkillId: AC_SHOWER,        Level: 10, Rate: 8000, Condition: enemy_count_nearby, CondValue: 3 }
+      - { SkillId: HT_BLITZBEAT,     Level: 5,  Rate: 4000 }
+      - { SkillId: AC_CHARGEARROW,   Level: 1,  Rate: 6000, Kind: escape, Condition: distance_below, CondValue: 2 }
+      - { SkillId: HT_DETECTING,     Level: 4,  Condition: enemy_hidden }
