@@ -76,7 +76,10 @@ files we do not use. Our changes carry a `nostalRE` comment:
   char-server and the database never see it; one record in
   `population_engine.cpp` says whose it is, and every way out goes through
   `population_engine_companion_dismiss`. It follows its owner, across maps too,
-  and helps in fights. It is a party member for EXP: Even Share pools its kills
+  and helps in fights. It reacts to its owner's moves a moment late, trails a
+  walking owner at its own distance, and around an owner standing still takes a
+  free cell of its own by role (a tank in front, healers, casters and ranged
+  weapons behind, the rest at a side), shifting now and then. It is a party member for EXP: Even Share pools its kills
   with the player's (a party made by the whisper starts on Even Share), Each Take
   keeps them its own, and its share is lost. The char-server's
   `party_share_level` gap applies to it too (`party_exp_share_allowed`, read from
