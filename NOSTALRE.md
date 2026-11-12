@@ -126,6 +126,16 @@ files we do not use. Our changes carry a `nostalRE` comment:
 - Sages, Professors and Sorcerers cast Dispell only on players: a new skill
   condition, `enemy_is_player`, keeps it for PvP and the arena. Against monsters
   it was mostly wasted SP, and it could even thaw a monster someone had frozen.
+- Vendor shells stand in the main towns: one `VendorPlacement:` list at the end
+  of `db/population_vendors.yml` (a body entry without `VendorKey`) names the
+  maps, Prontera with the most, each with a box around the town centre. Upstream
+  put them all on `prt_mk`, which no warp leads to. A vendor's cell keeps 3 cells
+  from any NPC or warp and skips `novending`; it holds its stall for a random
+  shift (`population_engine_vendor_shift_min_ms`/`_max_ms`, 15-40 min), then a
+  new vendor opens elsewhere in the box. Untradeable items are left out of the
+  stock (one used to refuse the whole shop), a shop that still fails is logged
+  and its shell released, and the map's cap scales with density like its target.
+  `@populate vendors` lists the map's shops.
 
 ## Building the Android servers
 

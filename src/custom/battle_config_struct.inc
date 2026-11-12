@@ -88,6 +88,8 @@ int32 population_engine_demand_spawn; // nostalRE: shells only on maps a player 
 int32 population_engine_demand_grace_ms; // nostalRE: keep a vacated map's shells this long
 int32 population_engine_density_pct; // nostalRE: scales spawn table counts
 int32 population_engine_companion_max; // nostalRE: shells one player can have in their party
+int32 population_engine_vendor_shift_min_ms; // nostalRE: a vendor shell keeps its stall this long at least
+int32 population_engine_vendor_shift_max_ms; // nostalRE: and this long at most (0 = until its map empties)
 int32 population_engine_companion_revive_ms; // nostalRE: a dead companion nobody revives gets up by its owner after this
 /// Daily cycle: 0=off, 1=on. When enabled, town shells switch behavior by server hour:
 ///   06:00-17:59 = configured behavior, 18:00-21:59 = Social, 22:00-05:59 = Sit.

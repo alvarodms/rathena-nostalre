@@ -398,8 +398,71 @@ const std::string PopulationVendorDatabase::getDefaultLocation()
 	return population_config_db_path_vendors_yaml();
 }
 
+/// nostalRE: one VendorPlacement: block (a map or a list of maps) into placements_by_map_,
+/// the index the autosummon pass and the cell picker read. A map named twice keeps the last.
+void PopulationVendorDatabase::parsePlacements(const ryml::NodeRef& vp_node, const std::string& source)
+{
+	auto parse_one_vp = [&](const ryml::NodeRef& entry_node) {
+		std::string map_name;
+		if (!this->asString(entry_node, "Map", map_name) || map_name.empty())
+			return;
+		PopulationVendorPlacement p;
+		p.map = map_name;
+		if (this->nodeExists(entry_node, "MinSpacing")) {
+			int32_t s = 0;
+			if (this->asInt32(entry_node, "MinSpacing", s)) p.min_spacing = std::max(0, s);
+		}
+		if (this->nodeExists(entry_node, "MaxVendors")) {
+			int32_t mv = 0;
+			if (this->asInt32(entry_node, "MaxVendors", mv)) p.max_vendors = std::max(0, mv);
+		}
+		if (this->nodeExists(entry_node, "Area")) {
+			const ryml::NodeRef& area = entry_node[c4::to_csubstr("Area")];
+			int16_t x1 = -1, y1 = -1, x2 = -1, y2 = -1;
+			if (this->nodeExists(area, "X1")) this->asInt16(area, "X1", x1);
+			if (this->nodeExists(area, "Y1")) this->asInt16(area, "Y1", y1);
+			if (this->nodeExists(area, "X2")) this->asInt16(area, "X2", x2);
+			if (this->nodeExists(area, "Y2")) this->asInt16(area, "Y2", y2);
+			// Normalize swapped corners (e.g. user supplied Y1=149, Y2=46).
+			if (x1 >= 0 && x2 >= 0 && x1 > x2) std::swap(x1, x2);
+			if (y1 >= 0 && y2 >= 0 && y1 > y2) std::swap(y1, y2);
+			p.area_x1 = x1; p.area_y1 = y1; p.area_x2 = x2; p.area_y2 = y2;
+		}
+		if (placements_by_map_.find(map_name) != placements_by_map_.end()) {
+			const PopulationVendorPlacement &existing = placements_by_map_[map_name];
+			const bool identical =
+				existing.min_spacing == p.min_spacing &&
+				existing.max_vendors == p.max_vendors &&
+				existing.area_x1 == p.area_x1 && existing.area_y1 == p.area_y1 &&
+				existing.area_x2 == p.area_x2 && existing.area_y2 == p.area_y2;
+			if (!identical) {
+				ShowWarning("%s: VendorPlacement Map '%s' already defined with different settings; "
+				            "the last one wins.\n",
+				            source.c_str(), map_name.c_str());
+			}
+		}
+		placements_by_map_[map_name] = std::move(p);
+	};
+	if (vp_node.is_seq()) {
+		for (const ryml::NodeRef& en : vp_node.children())
+			parse_one_vp(en);
+	} else if (vp_node.is_map()) {
+		parse_one_vp(vp_node);
+	}
+}
+
 uint64 PopulationVendorDatabase::parseBodyNode(const ryml::NodeRef& node)
 {
+	// nostalRE: an entry with only VendorPlacement: lists the maps vendor shells stand on
+	if (!this->nodeExists(node, "VendorKey")) {
+		if (!this->nodeExists(node, "VendorPlacement")) {
+			this->invalidWarning(node, "Missing node \"VendorKey\" or \"VendorPlacement\".\n");
+			return 0;
+		}
+		this->parsePlacements(node[c4::to_csubstr("VendorPlacement")], "placement list");
+		return 1;
+	}
+
 	std::string key;
 	if (!this->asString(node, "VendorKey", key) || key.empty())
 		return 0;
@@ -576,61 +639,10 @@ uint64 PopulationVendorDatabase::parseBodyNode(const ryml::NodeRef& node)
 		}
 	}
 
-	// VendorPlacement: optional per-vendor placement constraint (Map / MinSpacing /
-	// MaxVendors / Area). Populates the derived placements_by_map_ index used by
-	// the autosummon pass and the cell picker. If multiple vendor entries name the
-	// same Map, the last one parsed wins (a warning is emitted).
-	if (this->nodeExists(node, "VendorPlacement")) {
-		const ryml::NodeRef& vp_node = node[c4::to_csubstr("VendorPlacement")];
-		auto parse_one_vp = [&](const ryml::NodeRef& entry_node) {
-			std::string map_name;
-			if (!this->asString(entry_node, "Map", map_name) || map_name.empty())
-				return;
-			PopulationVendorPlacement p;
-			p.map = map_name;
-			if (this->nodeExists(entry_node, "MinSpacing")) {
-				int32_t s = 0;
-				if (this->asInt32(entry_node, "MinSpacing", s)) p.min_spacing = std::max(0, s);
-			}
-			if (this->nodeExists(entry_node, "MaxVendors")) {
-				int32_t mv = 0;
-				if (this->asInt32(entry_node, "MaxVendors", mv)) p.max_vendors = std::max(0, mv);
-			}
-			if (this->nodeExists(entry_node, "Area")) {
-				const ryml::NodeRef& area = entry_node[c4::to_csubstr("Area")];
-				int16_t x1 = -1, y1 = -1, x2 = -1, y2 = -1;
-				if (this->nodeExists(area, "X1")) this->asInt16(area, "X1", x1);
-				if (this->nodeExists(area, "Y1")) this->asInt16(area, "Y1", y1);
-				if (this->nodeExists(area, "X2")) this->asInt16(area, "X2", x2);
-				if (this->nodeExists(area, "Y2")) this->asInt16(area, "Y2", y2);
-				// Normalize swapped corners (e.g. user supplied Y1=149, Y2=46).
-				if (x1 >= 0 && x2 >= 0 && x1 > x2) std::swap(x1, x2);
-				if (y1 >= 0 && y2 >= 0 && y1 > y2) std::swap(y1, y2);
-				p.area_x1 = x1; p.area_y1 = y1; p.area_x2 = x2; p.area_y2 = y2;
-			}
-			if (placements_by_map_.find(map_name) != placements_by_map_.end()) {
-				const PopulationVendorPlacement &existing = placements_by_map_[map_name];
-				const bool identical =
-					existing.min_spacing == p.min_spacing &&
-					existing.max_vendors == p.max_vendors &&
-					existing.area_x1 == p.area_x1 && existing.area_y1 == p.area_y1 &&
-					existing.area_x2 == p.area_x2 && existing.area_y2 == p.area_y2;
-				if (!identical) {
-					ShowWarning("VendorKey '%s': VendorPlacement Map '%s' already defined by another "
-					            "vendor entry with different settings; overwriting (placements are "
-					            "unioned per map).\n",
-					            key.c_str(), map_name.c_str());
-				}
-			}
-			placements_by_map_[map_name] = std::move(p);
-		};
-		if (vp_node.is_seq()) {
-			for (const ryml::NodeRef& en : vp_node.children())
-				parse_one_vp(en);
-		} else if (vp_node.is_map()) {
-			parse_one_vp(vp_node);
-		}
-	}
+	// VendorPlacement: optional placement constraints (Map / MinSpacing / MaxVendors / Area).
+	// They are kept per map and apply to every vendor shell, whichever entry names them.
+	if (this->nodeExists(node, "VendorPlacement"))
+		this->parsePlacements(node[c4::to_csubstr("VendorPlacement")], key);
 
 	entries_[key] = std::move(entry);
 	return 1;

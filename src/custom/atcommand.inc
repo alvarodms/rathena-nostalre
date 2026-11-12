@@ -59,6 +59,7 @@ ACMD_FUNC(populate)
 		clif_displaymessage(fd, "  @populate stop | stats | status  (alias: @fakeplayers)");
 		clif_displaymessage(fd, "  @populate timing | timingreset  (wander tick profiler)");
 		clif_displaymessage(fd, "  @populate levels  (level, stats and gear of the shells on this map)");
+		clif_displaymessage(fd, "  @populate vendors  (shops on this map: cell, NPC clearance, shift left)");
 		return -1;
 	}
 
@@ -97,6 +98,8 @@ ACMD_FUNC(populate)
 		clif_displaymessage(fd, "================================");
 	} else if (strcmpi(cmd, "levels") == 0) {
 		population_engine_report_levels(fd, sd->m);
+	} else if (strcmpi(cmd, "vendors") == 0) {
+		population_engine_report_vendors(fd, sd->m);
 	} else if (strcmpi(cmd, "status") == 0) {
 		if (population_engine_is_running())
 			clif_displaymessage(fd, "Population engine is RUNNING");

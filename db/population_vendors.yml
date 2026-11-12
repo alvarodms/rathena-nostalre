@@ -66,19 +66,26 @@
 #     Amount: N                             (default 1)
 #     Price: N                              (default 0 = use item buy price)
 #
-# VendorPlacement: (optional)
-#   Restricts where shells of this vendor stand. When ANY vendor entry has a
-#   VendorPlacement block, vendor-behavior shells are restricted to listed
-#   maps only (vendors won't spawn on towns/fields/dungeons that aren't in
-#   any VendorPlacement).
-#     Map:        Map name (required, e.g. prt_mk).
+# VendorPlacement: (optional; a map or a list of maps)
+#   Where vendor shells stand. Placements are kept per map and apply to every
+#   vendor, whichever entry names them, so this file keeps them in one body
+#   entry of their own (- VendorPlacement: [...], no VendorKey) at the end.
+#   When ANY placement exists, vendor shells only stand on the listed maps.
+#     Map:        Map name (required, e.g. prontera).
 #     MinSpacing: Minimum cells between two vendor shells (0 = off).
-#     MaxVendors: Hard cap on simultaneous vendor shells on this map (0 = no cap).
+#     MaxVendors: How many shops the map holds (0 = 12).
 #     Area:       Optional bounding box {X1, Y1, X2, Y2}. Y in map coords
 #                 (0 = bottom). Lower-left + upper-right; min/max auto-normalized.
-#                 Omit Area: to allow the whole map.
-#   Note: placements are merged per Map across the whole file. If two vendor
-#   entries declare the same Map, the last one parsed wins (warning logged).
+#                 Omit Area: to allow the whole map (less a border).
+#   A map named twice keeps the last one (warning logged).
+#
+# How many shops a town gets: MaxVendors, times the "How busy" setting
+# (population_engine_density_pct), and only while a player is on the map (demand
+# spawn). Vendors count toward "Max AI players" (population_engine_max_count) like
+# any shell. Each stands on a random walkable cell of its Area, 3+ cells from any
+# NPC or warp and off novending cells, and keeps it for a random shift
+# (population_engine_vendor_shift_min_ms/_max_ms); then it packs up and a new one
+# opens elsewhere in the Area.
 # ---------------------------------------------------------------------------
 
 Header:
@@ -117,17 +124,6 @@ Body:
         Amount: 50
       - Item: Awakening_Potion
         Amount: 50
-    VendorPlacement:
-      Map: prt_mk
-      MinSpacing: 2
-      MaxVendors: 100
-      # Bounding box: Y is in map coordinates (0 = bottom).
-      # Use lower-left + upper-right; min/max are auto-normalized.
-      Area:
-        X1: 50
-        Y1: 46
-        X2: 149
-        Y2: 149
   # ------------------------------------------------------------------
   # Static vendor: buff potions (pre-cast potions for adventurers)
   # ------------------------------------------------------------------
@@ -149,17 +145,6 @@ Body:
         Amount: 100
       - Item: Magnifier
         Amount: 100
-    VendorPlacement:
-      Map: prt_mk
-      MinSpacing: 2
-      MaxVendors: 100
-      # Bounding box: Y is in map coordinates (0 = bottom).
-      # Use lower-left + upper-right; min/max are auto-normalized.
-      Area:
-        X1: 50
-        Y1: 46
-        X2: 149
-        Y2: 149
   # ------------------------------------------------------------------
   # Static vendor: arrows and ammunition
   # ------------------------------------------------------------------
@@ -191,17 +176,6 @@ Body:
         Amount: 2000
       - Item: Iron_Arrow_Container
         Amount: 1000
-    VendorPlacement:
-      Map: prt_mk
-      MinSpacing: 2
-      MaxVendors: 100
-      # Bounding box: Y is in map coordinates (0 = bottom).
-      # Use lower-left + upper-right; min/max are auto-normalized.
-      Area:
-        X1: 50
-        Y1: 46
-        X2: 149
-        Y2: 149
   # ------------------------------------------------------------------
   # Static vendor: equipment basics (weapons, armor for new players)
   # ------------------------------------------------------------------
@@ -236,17 +210,6 @@ Body:
       - Item: Apple
         Amount: 200
         Price: 10
-    VendorPlacement:
-      Map: prt_mk
-      MinSpacing: 2
-      MaxVendors: 100
-      # Bounding box: Y is in map coordinates (0 = bottom).
-      # Use lower-left + upper-right; min/max are auto-normalized.
-      Area:
-        X1: 50
-        Y1: 46
-        X2: 149
-        Y2: 149
   # ------------------------------------------------------------------
   # Dynamic vendor: sells items from FIELD mob drop tables across all
   # maps that any spawn entry lists under fields:.  Each shell rolls
@@ -266,17 +229,6 @@ Body:
       AllowCards: false
       AllowEtc: true
       AllowUsable: true
-    VendorPlacement:
-      Map: prt_mk
-      MinSpacing: 2
-      MaxVendors: 100
-      # Bounding box: Y is in map coordinates (0 = bottom).
-      # Use lower-left + upper-right; min/max are auto-normalized.
-      Area:
-        X1: 50
-        Y1: 46
-        X2: 149
-        Y2: 149
 
   # ------------------------------------------------------------------
   # Dynamic vendor: dungeon drops at a higher markup.  Allows equipment
@@ -295,17 +247,6 @@ Body:
       AllowCards: false            # cards stay rare/expensive elsewhere
       AllowEtc: true
       AllowUsable: true
-    VendorPlacement:
-      Map: prt_mk
-      MinSpacing: 2
-      MaxVendors: 100
-      # Bounding box: Y is in map coordinates (0 = bottom).
-      # Use lower-left + upper-right; min/max are auto-normalized.
-      Area:
-        X1: 50
-        Y1: 46
-        X2: 149
-        Y2: 149
   # ------------------------------------------------------------------
   # Example: explicit per-map dynamic vendor.
   # Use SourceMaps: instead of SourceCategory: when you want a specific
@@ -324,3 +265,84 @@ Body:
   #   ItemFlags:
   #     AllowEquipment: false
   #     AllowCards: false
+
+  # ------------------------------------------------------------------
+  # nostalRE: where vendor shells stand, for every VendorKey above. Main towns only;
+  # Prontera holds the most. Each Area is a box around the town's centre (the @go
+  # spot); shells take random walkable cells in it, 3+ cells from any NPC or warp,
+  # and move as their shifts end (population_engine_vendor_shift_*_ms).
+  # Izlude's channels each get their own stalls.
+  # ------------------------------------------------------------------
+  - VendorPlacement:
+      - Map: prontera
+        MinSpacing: 2
+        MaxVendors: 30
+        Area: { X1: 116, Y1: 151, X2: 196, Y2: 231 }
+      - Map: geffen
+        MinSpacing: 2
+        MaxVendors: 12
+        Area: { X1: 94, Y1: 34, X2: 144, Y2: 84 }
+      - Map: payon
+        MinSpacing: 2
+        MaxVendors: 12
+        Area: { X1: 137, Y1: 208, X2: 187, Y2: 258 }
+      - Map: morocc
+        MinSpacing: 2
+        MaxVendors: 12
+        Area: { X1: 131, Y1: 68, X2: 181, Y2: 118 }
+      - Map: aldebaran
+        MinSpacing: 2
+        MaxVendors: 12
+        Area: { X1: 115, Y1: 106, X2: 165, Y2: 156 }
+      - Map: yuno
+        MinSpacing: 2
+        MaxVendors: 12
+        Area: { X1: 132, Y1: 26, X2: 182, Y2: 76 }
+      - Map: lighthalzen
+        MinSpacing: 2
+        MaxVendors: 12
+        Area: { X1: 133, Y1: 67, X2: 183, Y2: 117 }
+      - Map: rachel
+        MinSpacing: 2
+        MaxVendors: 10
+        Area: { X1: 105, Y1: 85, X2: 155, Y2: 135 }
+      - Map: einbroch
+        MinSpacing: 2
+        MaxVendors: 10
+        Area: { X1: 39, Y1: 175, X2: 89, Y2: 225 }
+      - Map: izlude
+        MinSpacing: 2
+        MaxVendors: 6
+        Area: { X1: 108, Y1: 126, X2: 148, Y2: 166 }
+      - Map: izlude_a
+        MinSpacing: 2
+        MaxVendors: 6
+        Area: { X1: 108, Y1: 126, X2: 148, Y2: 166 }
+      - Map: izlude_b
+        MinSpacing: 2
+        MaxVendors: 6
+        Area: { X1: 108, Y1: 126, X2: 148, Y2: 166 }
+      - Map: izlude_c
+        MinSpacing: 2
+        MaxVendors: 6
+        Area: { X1: 108, Y1: 126, X2: 148, Y2: 166 }
+      - Map: izlude_d
+        MinSpacing: 2
+        MaxVendors: 6
+        Area: { X1: 108, Y1: 126, X2: 148, Y2: 166 }
+      - Map: alberta
+        MinSpacing: 2
+        MaxVendors: 6
+        Area: { X1: 172, Y1: 127, X2: 212, Y2: 167 }
+      - Map: comodo
+        MinSpacing: 2
+        MaxVendors: 6
+        Area: { X1: 189, Y1: 123, X2: 229, Y2: 163 }
+      - Map: hugel
+        MinSpacing: 2
+        MaxVendors: 6
+        Area: { X1: 76, Y1: 125, X2: 116, Y2: 165 }
+      - Map: veins
+        MinSpacing: 2
+        MaxVendors: 6
+        Area: { X1: 196, Y1: 103, X2: 236, Y2: 143 }

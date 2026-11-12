@@ -945,6 +945,22 @@ static size_t population_engine_count_vendors_on_map(int16_t map_id) {
     return count;
 }
 
+// nostalRE: a shop sign over a Kafra or a warp portal takes the taps meant for it, so
+// vendor shells keep this many cells from every NPC (warps are NPCs too).
+static constexpr int16 POP_VENDOR_NPC_CLEARANCE = 3;
+
+static int32 pop_count_bl_sub(block_list*, va_list) {
+	return 1;
+}
+
+/// nostalRE: can a vendor shell set up on this cell: a vending cell, clear of NPCs.
+static bool pop_vendor_cell_ok(int16 m, int16 x, int16 y) {
+	if (map_getcell(m, x, y, CELL_CHKNOVENDING))
+		return false;
+	const int16 r = POP_VENDOR_NPC_CLEARANCE;
+	return map_foreachinallarea(pop_count_bl_sub, m, x - r, y - r, x + r, y + r, BL_NPC) == 0;
+}
+
 
 
 // Forward declaration — defined after population_engine_shell_release.
@@ -1093,6 +1109,8 @@ static uint32_t population_engine_allocate_index()
 	return 0;
 }
 
+static int32_t pop_density_scaled(int32_t v); // nostalRE: defined with the autosummon timer
+
 /// Spawn up to `want` population shells on `map_id`, respecting global and per-map limits.
 /// `job_hint`     — preferred job; UINT16_MAX = random.
 /// `tick_budget`  — pointer to remaining spawn budget for this timer tick; nullptr = unlimited.
@@ -1198,11 +1216,14 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 		// placement entry is dropped here so towns/etc. cannot accumulate vendors.
 		if (is_vendor_spawn && !vp && population_vendor_db().any_vendor_placements())
 			continue;
+		if (is_vendor_spawn && map_getmapflag(map_id, MF_NOVENDING)) // nostalRE: as for players
+			continue;
 
 		// Enforce MaxVendors cap. vendor_positions_here was built before this loop
 		// and is updated after each successful vendor spawn below.
+		// nostalRE: scaled by density like the placement pass's target, or it stops short of it
 		if (vp && vp->max_vendors > 0 &&
-		    static_cast<int>(vendor_positions_here.size()) >= vp->max_vendors)
+		    static_cast<int>(vendor_positions_here.size()) >= pop_density_scaled(vp->max_vendors))
 			continue; // map full of vendors already
 
 		// Find a walkable spawn position.
@@ -1251,6 +1272,7 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 				if (sy >= mapdata->ys) sy = static_cast<int16_t>(mapdata->ys - 1);
 				if (!map_getcell(map_id, sx, sy, CELL_CHKPASS)) continue;
 				if (!cell_far_enough(sx, sy)) continue;
+				if (is_vendor_spawn && !pop_vendor_cell_ok(map_id, sx, sy)) continue; // nostalRE
 				x = sx; y = sy;
 				break;
 			}
@@ -1272,7 +1294,8 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 				sy = static_cast<int16_t>(lo_y + (rnd() % span_y));
 				if (map_search_freecell(nullptr, map_id, &sx, &sy,
 					std::min<int16_t>(static_cast<int16_t>(span_x / 2 + 4), 20),
-					std::min<int16_t>(static_cast<int16_t>(span_y / 2 + 4), 20), 1)) {
+					std::min<int16_t>(static_cast<int16_t>(span_y / 2 + 4), 20), 1)
+					&& pop_vendor_cell_ok(map_id, sx, sy)) { // nostalRE: spacing may give, NPCs may not
 					x = sx; y = sy;
 				}
 			}
@@ -1499,6 +1522,51 @@ static void pop_release_vacant_shells(size_t max_global) {
 		population_engine_shell_release(sd);
 }
 
+static int32 pop_collect_browsed_shop_sub(map_session_data* sd, va_list ap) {
+	auto* browsed = va_arg(ap, std::unordered_set<int32>*);
+	if (sd->vended_id != 0 && !population_engine_is_population_pc(sd->id))
+		browsed->insert(sd->vended_id);
+	return 0;
+}
+
+/// nostalRE: vendor shells whose shift is over pack up, and the placement pass that runs
+/// next opens new ones on other cells of the area, so stalls move over a long session.
+/// A shop a player has open waits a minute and looks again.
+static void pop_end_vendor_shifts() {
+	if (battle_config.population_engine_vendor_shift_max_ms <= 0)
+		return;
+	const t_tick now = gettick();
+	std::unordered_set<int32> browsed; // vender_id of the shops players have open
+	bool browsed_built = false;
+	std::vector<map_session_data*> done;
+	auto it = g_population_engine_pcs.begin();
+	while (it != g_population_engine_pcs.end()) {
+		map_session_data* sd = *it;
+		if (sd == nullptr || !sd->state.active || sd->prev == nullptr || !sd->state.vending
+			|| sd->pop.vendor_shift_end == 0 || DIFF_TICK(now, sd->pop.vendor_shift_end) < 0) {
+			++it;
+			continue;
+		}
+		if (!browsed_built) {
+			map_foreachpc(pop_collect_browsed_shop_sub, &browsed);
+			browsed_built = true;
+		}
+		if (browsed.count(sd->vender_id) != 0) {
+			sd->pop.vendor_shift_end = now + 60000;
+			++it;
+			continue;
+		}
+		done.push_back(sd);
+		it = g_population_engine_pcs.erase(it);
+		if (g_population_engine_count.load() > 0)
+			g_population_engine_count--;
+		if (g_population_engine_stats.active_units > 0)
+			g_population_engine_stats.active_units--;
+	}
+	for (map_session_data* sd : done)
+		population_engine_shell_release(sd);
+}
+
 /// population_engine_density_pct applied to a spawn table count; a populated count never rounds to 0.
 static int32_t pop_density_scaled(int32_t v) {
 	const int32 pct = battle_config.population_engine_density_pct;
@@ -1551,6 +1619,7 @@ TIMER_FUNC(population_engine_autosummon_timer)
 	// nostalRE: before the cap check, so shells on dead maps cannot hold the whole cap
 	if (battle_config.population_engine_demand_spawn)
 		pop_release_vacant_shells(max_global);
+	pop_end_vendor_shifts(); // nostalRE
 
 	if (g_population_engine_count.load() >= max_global)
 		return 0;
@@ -3165,6 +3234,10 @@ static map_session_data* population_engine_spawn_shell(int16_t map_id, int x, in
 				tmp_item.nameid = vs.nameid;
 				tmp_item.amount = 1;
 				tmp_item.identify = 1;
+				// nostalRE: vending_openvending refuses the whole shop over one untradeable item,
+				// and pc_cart_additem only checks the cart restriction, so drop those here.
+				if (!itemdb_cantrade(&tmp_item, pc_get_group_level(sd), pc_get_group_level(sd)))
+					continue;
 				if (pc_cart_additem(sd, &tmp_item, slot_amount, LOG_TYPE_NONE) != ADDITEM_SUCCESS)
 					continue;
 
@@ -3187,10 +3260,26 @@ static map_session_data* population_engine_spawn_shell(int16_t map_id, int x, in
 				vend_count++;
 			}
 
+			// nostalRE: a vendor without a shop is a merchant sitting there for nothing, and the
+			// placement pass, which counts open shops, would add another next to it every tick.
+			int8 vend_fail = 5; // no valid item
 			if (vend_count > 0) {
 				sd->state.prevend = 1;
-				vending_openvending(*sd, vend_title, vend_data, vend_count, nullptr);
+				vend_fail = vending_openvending(*sd, vend_title, vend_data, vend_count, nullptr);
 			}
+			if (vend_fail != 0) {
+				ShowWarning("Population engine: vendor shell '%s' on '%s' could not open its shop (VendorKey '%s', %d items, error %d); released.\n",
+					sd->status.name, map_getmapdata(sd->m)->name, pop_cfg != nullptr ? pop_cfg->vendor_key.c_str() : "",
+					vend_count, static_cast<int>(vend_fail));
+				population_engine_shell_release(sd);
+				return nullptr;
+			}
+			// nostalRE: its shift; when it ends a new vendor opens elsewhere in the area
+			const int32 shift_min = std::max<int32>(0, battle_config.population_engine_vendor_shift_min_ms);
+			const int32 shift_max = std::max<int32>(shift_min, battle_config.population_engine_vendor_shift_max_ms);
+			if (battle_config.population_engine_vendor_shift_max_ms > 0)
+				sd->pop.vendor_shift_end = gettick() + shift_min
+					+ (shift_max > shift_min ? static_cast<t_tick>(rnd() % static_cast<uint32>(shift_max - shift_min + 1)) : 0);
 		}
 	}
 
@@ -4047,6 +4136,29 @@ void population_engine_report_levels(int fd, int16_t map_id)
 			psd->pop.acts_skill, psd->pop.acts_melee, psd->pop.pauses);
 		clif_displaymessage(fd, msg);
 	}
+}
+
+/// nostalRE: one chat line for each vendor shell on the map (@populate vendors).
+void population_engine_report_vendors(int fd, int16_t map_id)
+{
+	char msg[CHAT_SIZE_MAX];
+	const t_tick now = gettick();
+	size_t shops = 0;
+	for (map_session_data* psd : g_population_engine_pcs) {
+		if (psd == nullptr || psd->m != map_id || !psd->state.vending)
+			continue;
+		++shops;
+		const long long left = psd->pop.vendor_shift_end != 0 ? static_cast<long long>(DIFF_TICK(psd->pop.vendor_shift_end, now)) / 1000 : -1;
+		safesnprintf(msg, sizeof(msg), "vendor aid %d at %d,%d items %d clear %s shift %llds \"%s\"",
+			psd->id, psd->x, psd->y, psd->vend_num, pop_vendor_cell_ok(psd->m, psd->x, psd->y) ? "yes" : "no",
+			left, psd->message);
+		clif_displaymessage(fd, msg);
+	}
+	const map_data* md = map_getmapdata(map_id);
+	const PopulationVendorPlacement* vp = md != nullptr ? population_vendor_db().vendor_placement_for_map(md->name) : nullptr;
+	safesnprintf(msg, sizeof(msg), "vendors %zu of %d on this map", shops,
+		vp != nullptr ? pop_density_scaled(vp->max_vendors > 0 ? vp->max_vendors : 12) : 0);
+	clif_displaymessage(fd, msg);
 }
 
 size_t population_engine_get_count() {

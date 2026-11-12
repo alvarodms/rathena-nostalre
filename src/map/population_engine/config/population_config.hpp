@@ -156,6 +156,8 @@ class PopulationVendorDatabase : public YamlDatabase {
 	/// the same Map, the last one parsed wins (a warning is emitted).
 	std::unordered_map<std::string, PopulationVendorPlacement> placements_by_map_;
 
+	void parsePlacements(const ryml::NodeRef& vp_node, const std::string& source);
+
 public:
 	PopulationVendorDatabase();
 	void clear() override;

@@ -179,6 +179,8 @@ struct s_population {
 	int    move_fail_count         = 0; ///< Consecutive movement failures chasing current target.
 	int    attack_fail_count       = 0; ///< Consecutive attack command failures on current target.
 
+	t_tick vendor_shift_end = 0;    ///< nostalRE: vendor shell: when it packs up its stall for a new one elsewhere (0 = never).
+
 	// --- nostalRE: party companion ---
 	uint32 companion_owner = 0;     ///< Shell: char id of the player whose party it joined (0 = plain shell).
 	int32  companion_pending = 0;   ///< Player: id of the shell waiting for this player's new party (0 = none).
