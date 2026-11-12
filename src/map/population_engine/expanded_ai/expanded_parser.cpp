@@ -80,6 +80,7 @@ static const std::unordered_map<std::string, uint8_t> s_legacy_cond = {
 	{ "enemy_race",           26 }, { "ally_count_nearby",    27 },
 	{ "enemy_is_boss",        28 }, { "sp_above",             29 },
 	{ "self_being_cast_on",   31 },
+	{ "enemy_is_player",      35 }, // nostalRE
 };
 
 // ----------------------------------------------------------------------------

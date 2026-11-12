@@ -668,6 +668,9 @@ bool population_shell_skill_condition_ok(
 		return count >= static_cast<int>(cond_value_num);
 	}
 
+	case C::EnemyIsPlayer: // nostalRE
+		return target_bl != nullptr && target_bl->type == BL_PC;
+
 	case C::EnemyIsBoss: {
 		if (!target_bl) return false;
 		TBL_MOB *md = BL_CAST(BL_MOB, target_bl);

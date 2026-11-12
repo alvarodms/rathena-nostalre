@@ -51,6 +51,7 @@ enum class PopSkillCondition : uint8_t {
 	AfterSkill          = 32, ///< Shell's previous successful cast matches cond_value_str skill name. Enables sequential combos (e.g. Frostnova → Thunder Storm). cond_sc_resolved holds resolved skill ID.
 	DamagedGt           = 33, ///< Shell received a single hit larger than (cond_value_num % of max HP). E.g. CondValue:10 triggers when hit by >10% max HP in one blow.
 	SkillUsed           = 34, ///< A specific skill (cond_value_str) was used against this shell within the last 3 seconds. Mirrors mob_skill_db `skillused`. cond_sc_resolved holds resolved skill ID.
+	EnemyIsPlayer       = 35, ///< nostalRE: target is a player (BL_PC), so a skill like Dispell is kept for PvP.
 };
 
 /// nostalRE: what a skill is for, which the scored picker (population_engine_scored_skills) weighs by.

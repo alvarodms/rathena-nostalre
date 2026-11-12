@@ -123,6 +123,9 @@ files we do not use. Our changes carry a `nostalRE` comment:
   entries may say what they are for with `Kind:`. The conditions still decide
   what can be cast. A caster waits out its delay instead of meleeing. Off: the
   old rotation, with `population_engine_shell_basic_attack_chance`.
+- Sages, Professors and Sorcerers cast Dispell only on players: a new skill
+  condition, `enemy_is_player`, keeps it for PvP and the arena. Against monsters
+  it was mostly wasted SP, and it could even thaw a monster someone had frozen.
 
 ## Building the Android servers
 
