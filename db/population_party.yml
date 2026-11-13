@@ -56,8 +56,10 @@
 #         Chance:    Percent of parties that have the slot. (Default: 100)
 #         Partner:   performer: the job standing next to it; the two come together or not at all.
 #         SkillSet:  A Name: in population_skill_db.yml, or a list of them: each member takes
-#                    the one written for its class, so [priest_camp, acolyte_camp] serves a
-#                    Priest and the Acolyte one steps down to. (Default: their build's or job's)
+#                    the one written closest to its class (its own, then its transcendent, then
+#                    its line's), so [priest_camp, acolyte_camp] serves a Priest and the Acolyte
+#                    one steps down to, and a Paladin takes paladin_camp over crusader_camp. A
+#                    member whose line has none keeps its own. (Default: their build's or job's)
 #         PartnerSkillSet: The same for the Partner.
 #         Build:     A Build: in population_personality.yml, or a list: each member takes the
 #                    first that is for its class. (Default: rolled)
@@ -111,11 +113,11 @@ Body:
       - "{map} PT {level}+ need killers"
       - "PT {level}+ heal + buffs"
       - "LF> members {map}"
-    RecruitChance: 50
+    RecruitChance: 100
     Respawn: [15, 30]
     Slots:
       - Duty: anchor
-        Jobs: { Priest: 4, HighPriest: 1, Knight: 2, Crusader: 1, Wizard: 1, Hunter: 1 }
+        Jobs: { Priest: 4, HighPriest: 1, Knight: 2, Wizard: 1, Hunter: 1 }
         SkillSet: [priest_camp, acolyte_camp]
         Build: [priest_support, acolyte_support]
       - Duty: support
@@ -125,6 +127,7 @@ Body:
       - Duty: roamer
         Jobs: { Knight: 3, Hunter: 3, Wizard: 2, Assassin: 2, Crusader: 1, Monk: 1, Rogue: 1, Blacksmith: 1 }
         Count: [3, 5]
+        SkillSet: [crusader_camp, paladin_camp, royal_guard_camp]
         Roam: map
         Return: { HpBelow: 45, SpBelow: 15, Unbuffed: true, After: [120, 300] }
         Leave: { HpAbove: 90, SpAbove: 60, Wait: [10, 30] }
@@ -148,7 +151,7 @@ Body:
       - "PT {level}+ heal + bless"
       - "LF> members {map}"
       - "party {level}+ need dps"
-    RecruitChance: 50
+    RecruitChance: 100
     Respawn: [15, 30]
     Slots:
       - Duty: anchor
@@ -176,11 +179,11 @@ Body:
       - "{map} PT {level}+ need killers"
       - "PT {level}+ heal + buffs"
       - "LF> members {map}"
-    RecruitChance: 50
+    RecruitChance: 100
     Respawn: [15, 30]
     Slots:
       - Duty: anchor
-        Jobs: { Priest: 3, Knight: 1, Crusader: 1 }
+        Jobs: { Priest: 3, Knight: 1 }
         SkillSet: [priest_camp, acolyte_camp]
         Build: [priest_support, acolyte_support]
       - Duty: support
@@ -190,6 +193,7 @@ Body:
       - Duty: roamer
         Jobs: { Knight: 2, Crusader: 2, Hunter: 2, Wizard: 2, Assassin: 1, Blacksmith: 1, Monk: 1 }
         Count: [3, 4]
+        SkillSet: [crusader_camp, paladin_camp, royal_guard_camp]
         Roam: map
         Return: { HpBelow: 45, SpBelow: 15, Unbuffed: true, After: [120, 300] }
         Leave: { HpAbove: 90, SpAbove: 60, Wait: [10, 30] }

@@ -2351,3 +2351,125 @@ Body:
       - { SkillId: DC_THROWARROW,      Level: 5,  Rate: 10000 }
       - { SkillId: AC_DOUBLE,          Level: 10, Rate: 8000 }
       - { SkillId: AC_CHARGEARROW,     Level: 1,  Rate: 9000, Condition: damaged_gt, CondValue: 20, Cooldown: 3000 }
+
+  # The Crusaders, Paladins and Royal Guards of a camp hunt as its killers do: their job's skills
+  # without Devotion, Providence, Piety or heals and Kyrie for others.
+  - Name: crusader_camp
+    JobId: 14
+    Skills:
+      - { SkillId: CR_TRUST,           Level: 10, Rate: 10000 }
+      - { SkillId: KN_SPEARMASTERY,    Level: 10, Rate: 10000 }
+      - { SkillId: KN_CAVALIERMASTERY, Level: 5,  Rate: 10000 }
+      - { SkillId: KN_RIDING,          Level: 1,  Rate: 10000 }
+      - { SkillId: AL_DP,              Level: 10, Rate: 10000 }
+      - { SkillId: AL_DEMONBANE,       Level: 10, Rate: 10000 }
+      - { SkillId: CR_HOLYCROSS,       Level: 10, Rate: 10000 }
+      - SkillId: CR_GRANDCROSS
+        Level: 10
+        Rate: 8000
+        Condition:
+          AND:
+            - enemy_count_nearby_ge2
+            - self_hp_pct_ge60
+            - self_sp_pct_ge40
+      - { SkillId: CR_SHIELDBOOMERANG, Level: 5,  Rate: 6000, Condition: distance_above, CondValue: 2 }
+      - { SkillId: CR_SHIELDCHARGE,    Level: 5,  Rate: 5000  }
+      - { SkillId: SM_PROVOKE,         Level: 10, Rate: 5000, Condition: not_enemy_status, CondValue: SC_PROVOKE }
+      - { SkillId: AL_HEAL,            Level: 10, Rate: 10000, Target: self, Condition: hp_below, CondValue: 40 }
+      - { SkillId: PR_KYRIE,           Level: 10, Rate: 8000, Target: self, Condition: not_self_status, CondValue: SC_KYRIE }
+      - { SkillId: CR_AUTOGUARD,       Level: 10, Rate: 10000, Target: self, Condition: not_self_status, CondValue: SC_AUTOGUARD }
+      - { SkillId: CR_REFLECTSHIELD,   Level: 10, Rate: 8000,  Target: self, Condition: not_self_status, CondValue: SC_REFLECTSHIELD }
+      - SkillId: CR_DEFENDER
+        Level: 5
+        Rate: 8000
+        Target: self
+        Condition:
+          AND:
+            - not_self_defender
+            - melee_attacked
+      - { SkillId: CR_SPEARQUICKEN,    Level: 10, Rate: 8000,  Target: self, Condition: not_self_status, CondValue: SC_SPEARQUICKEN }
+      - { SkillId: SM_ENDURE,          Level: 10, Rate: 8000,  Target: self, Condition: not_self_status, CondValue: SC_ENDURE }
+      - { SkillId: AL_PNEUMA,          Level: 1,  Target: self, Condition: range_attacked }
+      - { SkillId: CR_DEFENDER,        Level: 5,  Rate: 9000, Target: self, Condition: damaged_gt, CondValue: 25, Cooldown: 5000 }
+      - { SkillId: SM_ENDURE,          Level: 10, Rate: 9000, Target: self, Condition: skill_used, CondValue: WZ_STORMGUST, Cooldown: 6000 }
+
+  - Name: paladin_camp
+    JobId: 4015
+    Skills:
+      - { SkillId: CR_TRUST,           Level: 10, Rate: 10000 }
+      - { SkillId: KN_SPEARMASTERY,    Level: 10, Rate: 10000 }
+      - { SkillId: KN_CAVALIERMASTERY, Level: 5,  Rate: 10000 }
+      - { SkillId: KN_RIDING,          Level: 1,  Rate: 10000 }
+      - { SkillId: AL_DP,              Level: 10, Rate: 10000 }
+      - { SkillId: AL_DEMONBANE,       Level: 10, Rate: 10000 }
+      - { SkillId: PA_SHIELDCHAIN,     Level: 5,  Rate: 10000 }
+      - { SkillId: PA_PRESSURE,        Level: 5,  Rate: 8000  }
+      - { SkillId: CR_HOLYCROSS,       Level: 10, Rate: 6000  }
+      - SkillId: CR_GRANDCROSS
+        Level: 10
+        Rate: 7000
+        Condition:
+          AND:
+            - enemy_count_nearby_ge2
+            - self_hp_pct_ge60
+            - self_sp_pct_ge40
+      - { SkillId: CR_SHIELDBOOMERANG, Level: 5,  Rate: 5000, Condition: distance_above, CondValue: 2 }
+      - { SkillId: SM_PROVOKE,         Level: 10, Rate: 5000, Condition: not_enemy_status, CondValue: SC_PROVOKE }
+      - { SkillId: AL_HEAL,            Level: 10, Rate: 10000, Target: self, Condition: hp_below, CondValue: 40 }
+      - { SkillId: CR_AUTOGUARD,       Level: 10, Rate: 10000, Target: self, Condition: not_self_status, CondValue: SC_AUTOGUARD }
+      - { SkillId: CR_REFLECTSHIELD,   Level: 10, Rate: 8000,  Target: self, Condition: not_self_status, CondValue: SC_REFLECTSHIELD }
+      - SkillId: CR_DEFENDER
+        Level: 5
+        Rate: 8000
+        Target: self
+        Condition:
+          AND:
+            - not_self_defender
+            - melee_attacked
+      - { SkillId: CR_SPEARQUICKEN,    Level: 10, Rate: 8000,  Target: self, Condition: not_self_status, CondValue: SC_SPEARQUICKEN }
+      - { SkillId: SM_ENDURE,          Level: 10, Rate: 8000,  Target: self, Condition: not_self_status, CondValue: SC_ENDURE }
+      - { SkillId: AL_PNEUMA,          Level: 1,  Target: self, Condition: range_attacked }
+      - { SkillId: PA_SHIELDCHAIN,     Level: 5,  Rate: 9000, Condition: damaged_gt, CondValue: 20, Cooldown: 4000 }
+      - { SkillId: SM_ENDURE,          Level: 10, Rate: 9000, Target: self, Condition: skill_used, CondValue: WZ_STORMGUST, Cooldown: 6000 }
+
+  - Name: royal_guard_camp
+    JobId: 4066
+    Skills:
+      - { SkillId: CR_TRUST,           Level: 10, Rate: 10000 }
+      - { SkillId: KN_SPEARMASTERY,    Level: 10, Rate: 10000 }
+      - { SkillId: KN_CAVALIERMASTERY, Level: 5,  Rate: 10000 }
+      - { SkillId: KN_RIDING,          Level: 1,  Rate: 10000 }
+      - { SkillId: AL_DP,              Level: 10, Rate: 10000 }
+      - { SkillId: AL_DEMONBANE,       Level: 10, Rate: 10000 }
+      - { SkillId: LG_BANISHINGPOINT,  Level: 10, Rate: 10000 }
+      - { SkillId: LG_CANNONSPEAR,     Level: 5,  Rate: 8000, Condition: distance_above, CondValue: 3 }
+      - { SkillId: LG_OVERBRAND,       Level: 5,  Rate: 8000, Condition: enemy_count_nearby, CondValue: 2 }
+      - { SkillId: LG_RAYOFGENESIS,    Level: 10, Rate: 7000, Condition: enemy_count_nearby, CondValue: 2 }
+      - { SkillId: LG_SHIELDPRESS,     Level: 10, Rate: 6000  }
+      - { SkillId: LG_MOONSLASHER,     Level: 5,  Rate: 5000, Condition: enemy_count_nearby, CondValue: 3 }
+      - { SkillId: LG_EARTHDRIVE,      Level: 5,  Rate: 5000, Condition: enemy_count_nearby, CondValue: 2 }
+      - { SkillId: LG_HESPERUSLIT,     Level: 5,  Rate: 5000  }
+      - { SkillId: LG_PINPOINTATTACK,  Level: 5,  Rate: 4000  }
+      - { SkillId: PA_SHIELDCHAIN,     Level: 5,  Rate: 5000  }
+      - { SkillId: PA_PRESSURE,        Level: 5,  Rate: 5000  }
+      - { SkillId: AL_HEAL,            Level: 10, Rate: 10000, Target: self, Condition: hp_below, CondValue: 40 }
+      - { SkillId: CR_AUTOGUARD,       Level: 10, Rate: 10000, Target: self, Condition: not_self_status, CondValue: SC_AUTOGUARD }
+      - { SkillId: CR_REFLECTSHIELD,   Level: 10, Rate: 8000,  Target: self, Condition: not_self_status, CondValue: SC_REFLECTSHIELD }
+      - SkillId: CR_DEFENDER
+        Level: 5
+        Rate: 8000
+        Target: self
+        Condition:
+          AND:
+            - not_self_defender
+            - melee_attacked
+      - { SkillId: LG_PRESTIGE,        Level: 5,  Rate: 8000,  Target: self, Condition: not_self_status, CondValue: SC_PRESTIGE }
+      - { SkillId: LG_FORCEOFVANGUARD, Level: 5,  Rate: 8000,  Target: self, Condition: not_self_status, CondValue: SC_FORCEOFVANGUARD }
+      - { SkillId: LG_BANDING,         Level: 5,  Rate: 6000,  Target: self, Condition: not_self_status, CondValue: SC_BANDING }
+      - { SkillId: LG_SHIELDSPELL,     Level: 3,  Rate: 6000,  Target: self }
+      - { SkillId: LG_EXEEDBREAK,      Level: 5,  Rate: 6000,  Target: self }
+      - { SkillId: SM_ENDURE,          Level: 10, Rate: 8000,  Target: self, Condition: not_self_status, CondValue: SC_ENDURE }
+      - { SkillId: LG_REFLECTDAMAGE,   Level: 5,  Rate: 6000, Target: self, Condition: melee_attacked }
+      - { SkillId: AL_PNEUMA,          Level: 1,  Target: self, Condition: range_attacked }
+      - { SkillId: LG_INSPIRATION,     Level: 5,  Rate: 5000, Target: self, Condition: hp_below, CondValue: 25 }
+      - { SkillId: LG_KINGS_GRACE,     Level: 5,  Rate: 5000, Target: self, Condition: hp_below, CondValue: 20 }
