@@ -32,8 +32,8 @@
 #                      Defend: members at the camp fight monsters attacking a member this close
 #                              to it, and nothing else (Default: 10),
 #                      Sit:    members with nothing to cast sit down (Default: true) }
-#     Recruit:       Chat room titles for the leader. {map} is the map's name, {level} its
-#                    monsters' level rounded down to a five. (Default: none)
+#     Recruit:       Chat room titles for the leader. {map} is the map's name, {level} the
+#                    party's lowest level rounded down to a five. (Default: none)
 #     RecruitChance: Percent of parties whose leader opens one. A leader in a chat room casts
 #                    nothing, so their party has a support. (Default: 0)
 #     Respawn:       [min, max] seconds a member killed out of the healer's sight lies there
@@ -55,11 +55,12 @@
 #                    leader is no support)
 #         Chance:    Percent of parties that have the slot. (Default: 100)
 #         Partner:   performer: the job standing next to it; the two come together or not at all.
-#         SkillSet:  A Name: in population_skill_db.yml, taken by the members whose class it
-#                    was written for. (Default: their build's or job's)
+#         SkillSet:  A Name: in population_skill_db.yml, or a list of them: each member takes
+#                    the one written for its class, so [priest_camp, acolyte_camp] serves a
+#                    Priest and the Acolyte one steps down to. (Default: their build's or job's)
 #         PartnerSkillSet: The same for the Partner.
-#         Build:     A Build: in population_personality.yml, taken by the members it is for.
-#                    (Default: rolled)
+#         Build:     A Build: in population_personality.yml, or a list: each member takes the
+#                    first that is for its class. (Default: rolled)
 #         roamers only:
 #         Roam:      Cells from the camp it hunts within, or map: anywhere on the map. A
 #                    temperament's Leash holds it nearer (population_personality.yml).
@@ -77,12 +78,19 @@
 #                    population_engine_density_pct like the shells they are made of.
 #     Camps:         [[x, y], ...] -- camp spots, taken in order. (Default: by one of the map's
 #                    warps, where parties used to gather, 30 cells from the next camp)
+#     Levels:        [min, max] -- the base levels of its parties. Each party takes a window
+#                    of it 15 levels wide at most, so its members share EXP. (Default: from 8
+#                    below the map's monster level to 7 above: Renewal gives more EXP for a
+#                    monster above you, so players hunt monsters above them)
 #     Chance:        { duty: percent } -- instead of the slots' Chance on this map, for maps
 #                    where every party had songs or no party had a Professor.
 #
-# Classes fit the map (population_engine_map_levels): on a map too low for a class the slot
-# gets the class below it (Priest to Acolyte, Knight to Swordsman, then Novice). A performer or
-# battery slot is left out there, and so is a support who would be a Novice.
+# Classes fit the party's levels (population_engine_map_levels): each member rolls a level in
+# its party's window, and a class it cannot be at that level gets the class below it (High
+# Priest to Priest, Priest to Acolyte, Knight to Swordsman, then Novice; second classes start
+# at 55), so where second classes start, some parties have them. A performer or battery slot
+# is left out then, and so is a support who would be a Novice. A performer's Partner is the
+# performer's level.
 # @populate parties lists the parties on your map. Reload with @reloadpopenginedb; parties on
 # the map keep what they were made from.
 ###########################################################################
@@ -108,12 +116,12 @@ Body:
     Slots:
       - Duty: anchor
         Jobs: { Priest: 4, HighPriest: 1, Knight: 2, Crusader: 1, Wizard: 1, Hunter: 1 }
-        SkillSet: priest_camp
-        Build: priest_support
+        SkillSet: [priest_camp, acolyte_camp]
+        Build: [priest_support, acolyte_support]
       - Duty: support
         Jobs: { Priest: 4, HighPriest: 1 }
-        SkillSet: priest_camp
-        Build: priest_support
+        SkillSet: [priest_camp, acolyte_camp]
+        Build: [priest_support, acolyte_support]
       - Duty: roamer
         Jobs: { Knight: 3, Hunter: 3, Wizard: 2, Assassin: 2, Crusader: 1, Monk: 1, Rogue: 1, Blacksmith: 1 }
         Count: [3, 5]
@@ -131,19 +139,100 @@ Body:
         SkillSet: professor_battery
         Chance: 25
 
+  # The party of a first-class field: an Acolyte keeping a few killers blessed and healed.
+  - Party: camp_first_job
+    Tactic: camp
+    Camp: { Radius: 4, Defend: 10, Sit: true }
+    Recruit:
+      - "LF> party {map} {level}+"
+      - "PT {level}+ heal + bless"
+      - "LF> members {map}"
+      - "party {level}+ need dps"
+    RecruitChance: 50
+    Respawn: [15, 30]
+    Slots:
+      - Duty: anchor
+        Jobs: { Acolyte: 3, Swordsman: 1, Archer: 1 }
+        SkillSet: acolyte_camp
+        Build: acolyte_support
+      - Duty: support
+        Jobs: { Acolyte: 1 }
+        SkillSet: acolyte_camp
+        Build: acolyte_support
+      - Duty: roamer
+        Jobs: { Swordsman: 2, Archer: 2, Mage: 2, Thief: 2, Merchant: 1 }
+        Count: [2, 4]
+        Roam: map
+        Return: { HpBelow: 45, SpBelow: 15, Unbuffed: true, After: [120, 300] }
+        Leave: { HpAbove: 90, SpAbove: 60, Wait: [10, 30] }
+
+  # The party of the orc maps, where players change job: its places are second classes, and
+  # the map's levels make first classes of most of them (all on Geffen Field 10).
+  - Party: camp_orc
+    Tactic: camp
+    Camp: { Radius: 4, Defend: 10, Sit: true }
+    Recruit:
+      - "LF> party {map} {level}+"
+      - "{map} PT {level}+ need killers"
+      - "PT {level}+ heal + buffs"
+      - "LF> members {map}"
+    RecruitChance: 50
+    Respawn: [15, 30]
+    Slots:
+      - Duty: anchor
+        Jobs: { Priest: 3, Knight: 1, Crusader: 1 }
+        SkillSet: [priest_camp, acolyte_camp]
+        Build: [priest_support, acolyte_support]
+      - Duty: support
+        Jobs: { Priest: 1 }
+        SkillSet: [priest_camp, acolyte_camp]
+        Build: [priest_support, acolyte_support]
+      - Duty: roamer
+        Jobs: { Knight: 2, Crusader: 2, Hunter: 2, Wizard: 2, Assassin: 1, Blacksmith: 1, Monk: 1 }
+        Count: [3, 4]
+        Roam: map
+        Return: { HpBelow: 45, SpBelow: 15, Unbuffed: true, After: [120, 300] }
+        Leave: { HpAbove: 90, SpAbove: 60, Wait: [10, 30] }
+      - Duty: performer
+        Jobs: { Bard: 1 }
+        Partner: Dancer
+        SkillSet: bard_camp
+        PartnerSkillSet: dancer_camp
+        Chance: 10
+
 ###########################################################################
 # Maps
 ###########################################################################
 
-  # Veins Field 03 (Magmarings): the party map, songs and SP more often than not.
+  # Payon Field 08 (Spores, Wormtails, Boas): first classes, from 10 to 25.
+  - Map: pay_fild08
+    Parties: { camp_first_job: 1 }
+
+  # Payon Field 09 (Horns, Cocos, Elder Willows): first classes, from 25 to 40.
+  - Map: pay_fild09
+    Parties: { camp_first_job: 2 }
+
+  # Geffen Field 10 (Orc Warriors, Orc Ladies): first classes close to their job change.
+  - Map: gef_fild10
+    Parties: { camp_orc: 2 }
+    Levels: [35, 52]
+
+  # Orc Dungeon 1 (Orc Zombies, Orc Skeletons): where the first second classes show up.
+  - Map: orcsdun01
+    Parties: { camp_orc: 1 }
+    Levels: [40, 60]
+
+  # Veins Field 03 (Magmarings): the party map, songs and SP more often than not. Players
+  # level here from 95.
   - Map: ve_fild03
     Parties: { camp_leveling: 2 }
     Chance: { performer: 70, battery: 50 }
+    Levels: [95, 110]
 
-  # Geffen Field 06 (Petites).
+  # Geffen Field 06 (Petites): from 78 to 93.
   - Map: gef_fild06
     Parties: { camp_leveling: 1 }
 
-  # Sograt Desert 17 (Hodes, Sandmen).
+  # Sograt Desert 17 (Hodes, Sandmen): from 55 to 70.
   - Map: moc_fild17
     Parties: { camp_leveling: 1 }

@@ -2292,6 +2292,20 @@ Body:
       - { SkillId: PR_LEXAETERNA,    Level: 1,  Rate: 6000, Condition: not_enemy_status, CondValue: SC_AETERNA }
       - { SkillId: AL_HOLYLIGHT,     Level: 1,  Rate: 3000 }
 
+  # The Acolyte of a low-level camp: no Resurrection, Magnificat nor Gloria yet, and the skill
+  # levels of a job 30-40 Acolyte. Heals and buffs its party; it does not hunt.
+  - Name: acolyte_camp
+    JobId: 4
+    Skills:
+      - { SkillId: AL_HEAL,          Level: 5,  Rate: 10000, Target: self, Condition: hp_below, CondValue: 60 }
+      - { SkillId: AL_HEAL,          Level: 5,  Rate: 10000, Target: ally, Condition: ally_hp_below, CondValue: 90 }
+      - { SkillId: AL_BLESSING,      Level: 5,  Rate: 10000, Target: ally, Condition: not_ally_status, CondValue: SC_BLESSING }
+      - { SkillId: AL_INCAGI,        Level: 5,  Rate: 10000, Target: ally, Condition: not_ally_status, CondValue: SC_INCREASEAGI }
+      - { SkillId: AL_ANGELUS,       Level: 3,  Target: self, Condition: not_self_status, CondValue: SC_ANGELUS }
+      - { SkillId: AL_BLESSING,      Level: 5,  Target: self, Condition: not_self_status, CondValue: SC_BLESSING }
+      - { SkillId: AL_INCAGI,        Level: 5,  Target: self, Condition: not_self_status, CondValue: SC_INCREASEAGI }
+      - { SkillId: AL_PNEUMA,        Level: 1,  Target: self, Condition: range_attacked }
+
   # The Professor of a camp: Soul Exchange for a member out of SP, then its own HP into SP,
   # which the camp's priest heals back. Bolts for what attacks the camp.
   - Name: professor_battery

@@ -85,6 +85,27 @@ bool PopulationPartyDatabase::readRange(const ryml::NodeRef& node, const char* k
 	return true;
 }
 
+/// `Key: name` or `Key: [name, name]`.
+bool PopulationPartyDatabase::readNames(const ryml::NodeRef& node, const char* key, std::vector<std::string>& out)
+{
+	if (!this->nodeExists(node, key))
+		return false;
+	const ryml::NodeRef& n = node[c4::to_csubstr(key)];
+	if (n.is_seq()) {
+		for (const ryml::NodeRef& c : n.children()) {
+			const std::string name = pop_node_string(c);
+			if (!name.empty())
+				out.push_back(name);
+		}
+	} else {
+		std::string name;
+		this->asString(node, key, name);
+		if (!name.empty())
+			out.push_back(name);
+	}
+	return true;
+}
+
 /// `Jobs: { Priest: 3, Knight: 1 }`.
 bool PopulationPartyDatabase::readJobs(const ryml::NodeRef& node, const std::string& owner, std::vector<std::pair<uint16_t, uint16_t>>& out)
 {
@@ -136,20 +157,19 @@ bool PopulationPartyDatabase::readSlot(const ryml::NodeRef& node, const std::str
 			slot.partner_job = 0;
 		}
 	}
-	for (const auto& [key, out] : { std::pair<const char*, std::string*>{ "SkillSet", &slot.skill_set },
-			{ "PartnerSkillSet", &slot.partner_skill_set } }) {
-		if (!this->nodeExists(node, key))
-			continue;
-		this->asString(node, key, *out);
-		if (!out->empty() && population_skill_db().find_set(*out) == nullptr) {
-			this->invalidWarning(node, "Party '%s': no skill set named '%s' in population_skill_db.yml -- the job's own skills are used.\n",
-				party.c_str(), out->c_str());
-			out->clear();
-		}
+	for (const auto& [key, out] : { std::pair<const char*, std::vector<std::string>*>{ "SkillSet", &slot.skill_sets },
+			{ "PartnerSkillSet", &slot.partner_skill_sets } }) {
+		this->readNames(node, key, *out);
+		out->erase(std::remove_if(out->begin(), out->end(), [&](const std::string& set) {
+			if (population_skill_db().find_set(set) != nullptr)
+				return false;
+			this->invalidWarning(node, "Party '%s': no skill set named '%s' in population_skill_db.yml -- left out.\n",
+				party.c_str(), set.c_str());
+			return true;
+		}), out->end());
 	}
 
-	if (this->nodeExists(node, "Build"))
-		this->asString(node, "Build", slot.build);
+	this->readNames(node, "Build", slot.builds);
 
 	if (slot.duty == PopPartyDuty::Support)
 		slot.count_min = 0; // a healing anchor does without; pop_party_roll_plan raises it otherwise
@@ -224,6 +244,10 @@ uint64 PopulationPartyDatabase::parseBodyNode(const ryml::NodeRef& node)
 				}
 				m->camps.emplace_back(static_cast<int16_t>(x), static_cast<int16_t>(y));
 			}
+		}
+		if (this->readRange(node, "Levels", m->level_lo, m->level_hi)) {
+			m->level_lo = std::clamp(m->level_lo, 1, 999);
+			m->level_hi = std::clamp(m->level_hi, m->level_lo, 999);
 		}
 		if (this->nodeExists(node, "Chance")) {
 			for (const ryml::NodeRef& c : node[c4::to_csubstr("Chance")].children()) {
@@ -301,12 +325,14 @@ uint64 PopulationPartyDatabase::parseBodyNode(const ryml::NodeRef& node)
 
 void PopulationPartyDatabase::loadingFinished()
 {
+	// a build is for its jobs, and a slot's jobs can step down on a low map: one that fits no job at all
+	// is a typo, or a build that no longer exists
 	for (const auto& t : this->templates_)
 		for (const PopPartySlot& slot : t.second->slots)
-			if (!slot.build.empty() && std::none_of(slot.jobs.begin(), slot.jobs.end(), [&slot](const std::pair<uint16_t, uint16_t>& job) {
-					return population_personality_db().find_build(slot.build, job.first) != nullptr; }))
-				ShowWarning("population_party: party '%s' names build '%s', which population_personality.yml has for none of the slot's jobs -- builds are rolled.\n",
-					t.first.c_str(), slot.build.c_str());
+			for (const std::string& build : slot.builds)
+				if (!population_personality_db().has_build(build))
+					ShowWarning("population_party: party '%s' names build '%s', which population_personality.yml does not have.\n",
+						t.first.c_str(), build.c_str());
 	for (const auto& m : this->maps_)
 		for (const auto& p : m->parties)
 			if (this->templates_.find(p.first) == this->templates_.end())
