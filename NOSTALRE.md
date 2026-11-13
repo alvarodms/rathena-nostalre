@@ -98,9 +98,9 @@ files we do not use. Our changes carry a `nostalRE` comment:
   Novice); a first class on a map with monsters from level 50 may step up to a
   second class, and from level 70 always does (Swordsman to Knight or Crusader).
   A second class of the six first classes' lines is transcendent on
-  `population_engine_trans_pct` (30) of rolls, and a third class by a level
-  rolled in its map's band (a party member's own): none below 99, where players
-  change, all from 125 (a few on Magmarings, 88-106; some in towns): Knight
+  `population_engine_trans_pct` (30) of rolls, and a third class when the level
+  rolled in its map's band (a party member's own) is past 99, where a second
+  class stops, and only then (Magmarings, 88-106, and towns have some): Knight
   to Rune Knight, Lord Knight to its transcendent Rune Knight. A third class too
   high for its map steps down to its transcendent second class (Rune Knight to
   Lord Knight), which steps down to its second class below 60. A transcendent or
@@ -172,8 +172,8 @@ files we do not use. Our changes carry a `nostalRE` comment:
   wide at most, so it shares EXP, and each member a level in the window. A member
   too low for its slot's class gets the class below (a second class from 55), so
   where second classes start some parties have them; a second class may be
-  transcendent or, by the member's own level, a third class, as on maps above
-  (a few in Magmarings' 95-110; never a performer or a battery); a performer, a battery or a
+  transcendent, and a member past 99 is a third class (most of Magmarings'
+  95-110; never a performer or a battery, who stays at 99); a performer, a battery or a
   support who would be a Novice is left out. A slot's `SkillSet` and `Build` can
   list several, each member taking the one for its class (`priest_camp` for a
   Priest, `acolyte_camp` for an Acolyte). A party is its own party id on

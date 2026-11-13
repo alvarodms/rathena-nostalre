@@ -426,10 +426,11 @@ static uint16_t population_promote_job_for_map(uint16_t job_id, int16_t map_id, 
 }
 
 /// A second class of the six first classes' lines goes on as players do: transcendent on
-/// population_engine_trans_pct of rolls (Knight to Lord Knight), then a third class on
-/// pop_levels::third_pct(`level`) (Knight to Rune Knight, Lord Knight to its transcendent Rune
-/// Knight). `level`: the shell's own, a party member's or one rolled in its map's band;
-/// population_step_down_job then takes back what the level cannot be (a Lord Knight below 60). Taekwons, Gunslingers, Ninjas and Super Novices stay.
+/// population_engine_trans_pct of rolls (Knight to Lord Knight), and a third class when `level` is past
+/// 99, where a second class stops (Knight to Rune Knight, Lord Knight to its transcendent Rune Knight), never
+/// otherwise. `level`: a party member's own, or one rolled in the map's band, whose class then rolls its
+/// level on the same side of 99; population_step_down_job takes back what the level cannot be (a Lord
+/// Knight below 60). Taekwons, Gunslingers, Ninjas and Super Novices stay.
 static uint16_t population_advance_job(uint16_t job_id, int32_t level)
 {
 	uint64 mapid = pc_jobid2mapid(job_id);
@@ -439,7 +440,7 @@ static uint16_t population_advance_job(uint16_t job_id, int32_t level)
 		return job_id;
 	if ((mapid & JOBL_UPPER) == 0 && static_cast<int32_t>(rnd() % 100) < battle_config.population_engine_trans_pct)
 		mapid |= JOBL_UPPER;
-	if (static_cast<int32_t>(rnd() % 100) < pop_levels::third_pct(level))
+	if (pop_levels::third_class_level(level))
 		mapid |= JOBL_THIRD;
 	const int32 advanced = population_job_of_sex(mapid, job_id);
 	return advanced > 0 ? static_cast<uint16_t>(advanced) : job_id;

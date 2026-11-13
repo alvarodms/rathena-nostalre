@@ -52,13 +52,11 @@ static void test_member_level()
 	CHECK(member_level(w, 0, class_levels(Tier::Second)) == 55);
 }
 
-static void test_third_pct()
+static void test_third_class_level()
 {
-	CHECK(third_pct(98) == 0); // a third class from 99
-	CHECK(third_pct(99) > 0 && third_pct(99) <= 5);
-	CHECK(third_pct(111) > 40 && third_pct(111) < 60);
-	CHECK(third_pct(125) == 100);
-	CHECK(third_pct(141) == 100); // Bio Lab 3
+	CHECK(!third_class_level(99)); // a second class reaches 99
+	CHECK(third_class_level(100));  // and no further
+	CHECK(third_class_level(141));
 }
 
 static void test_stat_cost()
@@ -73,7 +71,7 @@ static void test_stat_cost()
 int main()
 {
 	test_class_levels();
-	test_third_pct();
+	test_third_class_level();
 	test_stat_cost();
 	test_party_default();
 	test_party_window();

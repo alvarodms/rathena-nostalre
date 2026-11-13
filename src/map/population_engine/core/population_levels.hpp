@@ -30,18 +30,15 @@ inline Range class_levels(Tier tier)
 	case Tier::FirstOnly:   return { 10, 999 };
 	case Tier::Second:      return { 55, 999 };
 	case Tier::TransSecond: return { 60, 999 };
-	case Tier::Third:       return { 99, 999 };
+	case Tier::Third:       return { 100, 999 }; // a second class stops at 99
 	}
 	return { 1, 999 };
 }
 
-/// The share (percent) of second classes that are third classes at `level`, the shell's own: none below 99,
-/// where players change to a third class, all from 125, as they keep levelling. A map at the edge
-/// (Magmarings, 88-106) has a few, Bio Lab 3 (127-155) nothing else.
-inline int32_t third_pct(int32_t level)
+/// Is a second class of `level` a third class? Only past 99, where a second class stops: always then.
+inline bool third_class_level(int32_t level)
 {
-	static constexpr int32_t BELOW = 98, ALL = 125;
-	return std::clamp((level - BELOW) * 100 / (ALL - BELOW), 0, 100);
+	return level >= class_levels(Tier::Third).lo;
 }
 
 /// Status points to raise a stat from 1 to `stat`: Renewal's pc_need_status_point steps, dearer from 100 on
