@@ -93,10 +93,24 @@ files we do not use. Our changes carry a `nostalRE` comment:
 - `population_engine_map_levels` (on): autosummoned shells take their level from
   the mean level of their map's permanent monsters, with a floor by class (a
   Knight is at least 55, as players change job late; `core/population_levels.hpp`,
-  tested in `src/test/`); towns and maps with no monsters use 30-85. A class
+  tested in `src/test/`); towns and maps with no monsters use 30-150. A class
   whose floor is clearly above the map steps down (Knight to Swordsman to
   Novice); a first class on a map with monsters from level 50 may step up to a
   second class, and from level 70 always does (Swordsman to Knight or Crusader).
+  A second class of the six first classes' lines is transcendent on
+  `population_engine_trans_pct` (30) of rolls, and a third class when the level
+  rolled in its map's band (a party member's own) is past 99, where a second
+  class stops, and only then (Magmarings, 88-106, and towns have some): Knight
+  to Rune Knight, Lord Knight to its transcendent Rune Knight. A third class too
+  high for its map steps down to its transcendent second class (Rune Knight to
+  Lord Knight), which steps down to its second class below 60. A transcendent or
+  third class wears its second class's `population_engine.yml` entry when it has
+  none, has its own skills from `db/population_skill_db.yml` (3rd jobs pay no
+  items, as all shells), stats up to its job's maximum (130 for third classes),
+  and rides its own mount: a Rune Knight a dragon, a Mechanic its Mado Gear.
+  Monster levels 100-141: Rachel, Niflheim, Splendide, Malangdo, Dicastes and
+  Bifrost fields, Kiel, Abyss Lake, Bio Lab, Odin, Juperos, Nidhoggur, Thor,
+  Rachel Sanctuary, the Abbey and Dicastes dungeons (`combat_pve`).
   Either way it still counts as its spawn-table job. Stats are fitted to what the
   level has in `db/re/statpoint.yml`, gear to what it can wear; a shell below its
   whole weapon pool gets the plainest weapon of that kind its job can wear.
@@ -157,7 +171,9 @@ files we do not use. Our changes carry a `nostalRE` comment:
   more EXP for monsters above you); each party takes a window of it 15 levels
   wide at most, so it shares EXP, and each member a level in the window. A member
   too low for its slot's class gets the class below (a second class from 55), so
-  where second classes start some parties have them; a performer, a battery or a
+  where second classes start some parties have them; a second class may be
+  transcendent, and a member past 99 is a third class (most of Magmarings'
+  95-110; never a performer or a battery, who stays at 99); a performer, a battery or a
   support who would be a Novice is left out. A slot's `SkillSet` and `Build` can
   list several, each member taking the one for its class (`priest_camp` for a
   Priest, `acolyte_camp` for an Acolyte). A party is its own party id on

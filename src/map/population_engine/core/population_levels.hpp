@@ -30,9 +30,25 @@ inline Range class_levels(Tier tier)
 	case Tier::FirstOnly:   return { 10, 999 };
 	case Tier::Second:      return { 55, 999 };
 	case Tier::TransSecond: return { 60, 999 };
-	case Tier::Third:       return { 99, 999 };
+	case Tier::Third:       return { 100, 999 }; // a second class stops at 99
 	}
 	return { 1, 999 };
+}
+
+/// Is a second class of `level` a third class? Only past 99, where a second class stops: always then.
+inline bool third_class_level(int32_t level)
+{
+	return level >= class_levels(Tier::Third).lo;
+}
+
+/// Status points to raise a stat from 1 to `stat`: Renewal's pc_need_status_point steps, dearer from 100 on
+/// (third classes go to 130).
+inline int32_t stat_cost(int32_t stat)
+{
+	int32_t cost = 0;
+	for (int32_t value = 1; value < stat; value++)
+		cost += value < 100 ? 2 + (value - 1) / 10 : 16 + 4 * ((value - 100) / 5);
+	return cost;
 }
 
 /// The levels a map's shell parties are when its entry names none: from 8 below its monsters to 7 above,
