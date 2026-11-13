@@ -35,6 +35,25 @@ inline Range class_levels(Tier tier)
 	return { 1, 999 };
 }
 
+/// The share (percent) of second classes that are third classes at `level`, the shell's own: none below 99,
+/// where players change to a third class, all from 125, as they keep levelling. A map at the edge
+/// (Magmarings, 88-106) has a few, Bio Lab 3 (127-155) nothing else.
+inline int32_t third_pct(int32_t level)
+{
+	static constexpr int32_t BELOW = 98, ALL = 125;
+	return std::clamp((level - BELOW) * 100 / (ALL - BELOW), 0, 100);
+}
+
+/// Status points to raise a stat from 1 to `stat`: Renewal's pc_need_status_point steps, dearer from 100 on
+/// (third classes go to 130).
+inline int32_t stat_cost(int32_t stat)
+{
+	int32_t cost = 0;
+	for (int32_t value = 1; value < stat; value++)
+		cost += value < 100 ? 2 + (value - 1) / 10 : 16 + 4 * ((value - 100) / 5);
+	return cost;
+}
+
 /// The levels a map's shell parties are when its entry names none: from 8 below its monsters to 7 above,
 /// since Renewal gives more EXP for a monster above you, up to 15 levels.
 inline Range party_default(int32_t map_level)

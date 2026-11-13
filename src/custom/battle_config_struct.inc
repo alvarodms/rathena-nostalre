@@ -99,6 +99,7 @@ int32 population_engine_vendor_shift_min_ms; // nostalRE: a vendor shell keeps i
 int32 population_engine_vendor_shift_max_ms; // nostalRE: and this long at most (0 = until its map empties)
 int32 population_engine_companion_revive_ms; // nostalRE: a dead companion nobody revives gets up by its owner after this
 int32 population_engine_parties; // nostalRE: shells form the parties of db/population_party.yml
+int32 population_engine_trans_pct; // nostalRE: share of second-class shells that are transcendent
 /// Daily cycle: 0=off, 1=on. When enabled, town shells switch behavior by server hour:
 ///   06:00-17:59 = configured behavior, 18:00-21:59 = Social, 22:00-05:59 = Sit.
 ///   Field/dungeon shells always use their configured behavior.

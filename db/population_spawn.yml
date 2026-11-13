@@ -117,7 +117,20 @@ Body:
       - pay_fild10
       - pay_fild11
       - ve_fild03  # nostalRE: Magmarings, a party map (db/population_party.yml)
-    FieldsPopulation: 1027  # nostalRE: was 1000, +1 map keeps the per-map count
+      # nostalRE: third classes' fields (monster level), where second classes give way to them
+      - ra_fild04  # 100
+      - ra_fild05  # 103
+      - ra_fild06  # 105
+      - nif_fild01 # 103
+      - nif_fild02 # 106
+      - spl_fild02 # 106
+      - ma_fild01  # 108
+      - spl_fild03 # 114
+      - ma_fild02  # 115
+      - dic_fild01 # 125
+      - dic_fild02 # 129
+      - bif_fild01 # 132
+    FieldsPopulation: 1360  # nostalRE: was 1000, +13 maps keep the per-map count
     Dungeons:
       - prt_maze01
       - prt_sewb1
@@ -144,7 +157,21 @@ Body:
       - gl_sew04
       - gl_step
       - orcsdun01
-    DungeonsPopulation: 1000
+      # nostalRE: third classes' dungeons (monster level)
+      - kh_dun01   # 108
+      - abyss_01   # 109
+      - lhz_dun01  # 111
+      - odin_tem02 # 112
+      - juperos_01 # 113
+      - nyd_dun01  # 115
+      - abyss_02   # 120
+      - thor_v02   # 121
+      - ra_san01   # 123
+      - abbey02    # 124
+      - dic_dun01  # 130
+      - lhz_dun02  # 133
+      - lhz_dun03  # 141
+    DungeonsPopulation: 1520  # nostalRE: was 1000, +13 maps keep the per-map count
 
   - Profile: pve_knight     # Knight
     Towns:

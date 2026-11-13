@@ -321,7 +321,7 @@ static int32_t population_map_mob_level(int16_t map_id)
 }
 
 /// The levels shells on a map are rolled in: around its monster level, or a broad range
-/// in towns and on maps with no monsters, since towns are where everybody meets.
+/// in towns and on maps with no monsters, since towns are where everybody meets (third classes too).
 /// Niflheim counts as a town though it has monsters.
 struct PopulationLevelBand {
 	int32_t lo, hi, spread;
@@ -329,7 +329,7 @@ struct PopulationLevelBand {
 
 static PopulationLevelBand population_map_level_band(int16_t map_id, uint8_t map_category)
 {
-	static constexpr int32_t TOWN_LEVEL_MIN = 30, TOWN_LEVEL_MAX = 85, TOWN_LEVEL_SPREAD = 12;
+	static constexpr int32_t TOWN_LEVEL_MIN = 30, TOWN_LEVEL_MAX = 150, TOWN_LEVEL_SPREAD = 12;
 	const int32_t map_level = map_category == 1 ? 0 : population_map_mob_level(map_id);
 	if (map_level <= 0)
 		return { TOWN_LEVEL_MIN, TOWN_LEVEL_MAX, TOWN_LEVEL_SPREAD };
@@ -360,6 +360,34 @@ static void population_class_level_range(uint16_t job_id, int32_t& floor_level, 
 	const pop_levels::Range range = pop_levels::class_levels(population_class_tier(job_id));
 	cap = std::min(range.hi, static_cast<int32_t>(job_db.get_maxBaseLv(job_id)));
 	floor_level = std::min(range.lo, cap);
+}
+
+/// The job of `mapid` for the sex `job_id` is for (a Gypsy's second class is a Dancer), or -1.
+static int32 population_job_of_sex(uint64 mapid, uint16_t job_id)
+{
+	const int32 sex = pc_mapid2jobid(pc_jobid2mapid(job_id), SEX_MALE) != job_id ? SEX_FEMALE : SEX_MALE;
+	return pc_mapid2jobid(mapid, sex);
+}
+
+/// The db/population_engine.yml entry a shell of this class spawns with: its own, else its second class's (a
+/// Lord Knight or Rune Knight takes the Knight's gear and behaviour), before db/population_pvp.yml's arena ones.
+static std::shared_ptr<PopulationEngine> population_engine_find_line(uint16_t job_id, PopulationDbSource* src)
+{
+	if (auto own = population_engine_db().find(job_id)) {
+		*src = PopulationDbSource::Main;
+		return own;
+	}
+	const uint64 mapid = pc_jobid2mapid(job_id);
+	if ((mapid & JOBL_2) && (mapid & (JOBL_UPPER | JOBL_THIRD))) {
+		const int32 second = population_job_of_sex(mapid & ~static_cast<uint64>(JOBL_UPPER | JOBL_THIRD), job_id);
+		if (second > 0) {
+			if (auto line = population_engine_db().find(static_cast<uint16_t>(second))) {
+				*src = PopulationDbSource::Main;
+				return line;
+			}
+		}
+	}
+	return population_engine_find_any(job_id, src);
 }
 
 /// A first class on a map players hunt on after their job change moves up to one of its
@@ -397,23 +425,45 @@ static uint16_t population_promote_job_for_map(uint16_t job_id, int16_t map_id, 
 	return seconds.empty() ? job_id : seconds[rnd() % seconds.size()];
 }
 
-/// The job a shell takes on this map: a class that cannot be this low steps down, so a
-/// Poring field holds Novices and new first classes instead of level 55 Knights. A second
-/// or third class becomes its first class (Knight to Swordsman, Super Novice to Novice),
-/// and a first class becomes a Novice. A few levels of slack keep the step for maps
-/// clearly too low. A first class on a high map steps up (population_promote_job_for_map).
+/// A second class of the six first classes' lines goes on as players do: transcendent on
+/// population_engine_trans_pct of rolls (Knight to Lord Knight), then a third class on
+/// pop_levels::third_pct(`level`) (Knight to Rune Knight, Lord Knight to its transcendent Rune
+/// Knight). `level`: the shell's own, a party member's or one rolled in its map's band;
+/// population_step_down_job then takes back what the level cannot be (a Lord Knight below 60). Taekwons, Gunslingers, Ninjas and Super Novices stay.
+static uint16_t population_advance_job(uint16_t job_id, int32_t level)
+{
+	uint64 mapid = pc_jobid2mapid(job_id);
+	const uint64 base_class = mapid & MAPID_FIRSTMASK;
+	if ((mapid & JOBL_2) == 0 || (mapid & (JOBL_THIRD | JOBL_FOURTH | JOBL_BABY)) != 0
+		|| base_class < MAPID_SWORDMAN || base_class > MAPID_THIEF)
+		return job_id;
+	if ((mapid & JOBL_UPPER) == 0 && static_cast<int32_t>(rnd() % 100) < battle_config.population_engine_trans_pct)
+		mapid |= JOBL_UPPER;
+	if (static_cast<int32_t>(rnd() % 100) < pop_levels::third_pct(level))
+		mapid |= JOBL_THIRD;
+	const int32 advanced = population_job_of_sex(mapid, job_id);
+	return advanced > 0 ? static_cast<uint16_t>(advanced) : job_id;
+}
+
+/// The job a shell takes on this map: a first class steps up on a map players hunt on after their job change
+/// (population_promote_job_for_map), a second class may be transcendent or a third class
+/// (population_advance_job), and a class that cannot be this low steps down, so a Poring field holds Novices
+/// and new first classes instead of level 55 Knights (population_step_down_job). A few levels of slack keep the
+/// step for maps clearly too low.
 static uint16_t population_step_down_job_for_map(uint16_t job_id, int16_t map_id, uint8_t map_category);
 
 static uint16_t population_fit_job_to_map(uint16_t job_id, int16_t map_id, uint8_t map_category)
 {
 	const uint16_t promoted = population_promote_job_for_map(job_id, map_id, map_category);
-	if (promoted != job_id)
-		return promoted;
-	return population_step_down_job_for_map(job_id, map_id, map_category);
+	const PopulationLevelBand band = population_map_level_band(map_id, map_category);
+	const uint16_t advanced = population_advance_job(promoted,
+		population_roll_closed_range(static_cast<int16_t>(band.lo), static_cast<int16_t>(band.hi)));
+	return population_step_down_job_for_map(advanced, map_id, map_category);
 }
 
-/// The class a shell of at most `level` can be: one whose floor is above it steps down, a transcendent second
-/// class to its second class (High Priest to Priest), a second or third class to its first class (Knight to
+/// The class a shell of at most `level` can be: one whose floor is above it steps down, a third class to its
+/// transcendent second class (Rune Knight to Lord Knight, as a player levelling there would be), a transcendent
+/// second class to its second class (High Priest to Priest), a second class to its first class (Knight to
 /// Swordsman, Super Novice to Novice), a first class to a Novice.
 static uint16_t population_step_down_job(uint16_t job_id, int32_t level)
 {
@@ -424,12 +474,15 @@ static uint16_t population_step_down_job(uint16_t job_id, int32_t level)
 		if (floor_level <= level)
 			break;
 		const uint64 mapid = pc_jobid2mapid(job);
-		const uint64 lower = (mapid & (JOBL_THIRD | JOBL_FOURTH)) ? (mapid & MAPID_FIRSTMASK)
-			: (mapid & JOBL_2) && (mapid & JOBL_UPPER) ? (mapid & ~static_cast<uint64>(JOBL_UPPER))
-			: (mapid & JOBL_2) ? (mapid & MAPID_FIRSTMASK) : MAPID_NOVICE;
-		// a Gypsy steps down to a Dancer
-		const int32 sex = pc_mapid2jobid(mapid, SEX_MALE) != job ? SEX_FEMALE : SEX_MALE;
-		const int32 lower_job = pc_mapid2jobid(lower, sex);
+		int32 lower_job = -1;
+		if ((mapid & JOBL_THIRD) && (mapid & JOBL_2)) // an expanded Super Novice has no transcendent second class
+			lower_job = population_job_of_sex((mapid & ~static_cast<uint64>(JOBL_THIRD)) | JOBL_UPPER, job);
+		if (lower_job <= 0) {
+			const uint64 lower = (mapid & (JOBL_THIRD | JOBL_FOURTH)) ? (mapid & MAPID_FIRSTMASK)
+				: (mapid & JOBL_2) && (mapid & JOBL_UPPER) ? (mapid & ~static_cast<uint64>(JOBL_UPPER))
+				: (mapid & JOBL_2) ? (mapid & MAPID_FIRSTMASK) : MAPID_NOVICE;
+			lower_job = population_job_of_sex(lower, job);
+		}
 		if (lower_job < 0 || lower_job == job)
 			break;
 		job = static_cast<uint16_t>(lower_job);
@@ -561,8 +614,10 @@ static uint16_t population_starter_weapon(const std::vector<uint16_t>& pool, uin
 
 /// Fit a stat rolled for a profile's level range to the level the shell got, since a level
 /// 10 Knight with 80 STR could not exist. Profiles with no stats have no range to scale,
-/// so they get an even spread a character of that level could afford.
-static uint16_t population_scale_stat(uint16_t rolled, int32_t level, const PopulationEngine* pop_cfg, bool has_stat_range)
+/// so they get an even spread a character of that level could afford. `max_stat`: the job's (99, a third
+/// class 130).
+static uint16_t population_scale_stat(uint16_t rolled, int32_t level, const PopulationEngine* pop_cfg, bool has_stat_range,
+	int32_t max_stat)
 {
 	int32_t stat;
 	if (has_stat_range) {
@@ -572,16 +627,7 @@ static uint16_t population_scale_stat(uint16_t rolled, int32_t level, const Popu
 	} else {
 		stat = population_roll_closed_range(static_cast<int16_t>(5 + level * 2 / 5), static_cast<int16_t>(5 + level * 3 / 5));
 	}
-	return static_cast<uint16_t>(cap_value(stat, 1, 99));
-}
-
-/// Points to raise a stat from 1, the same steps as pc_need_status_point up to 99.
-static int32_t population_stat_cost(int32_t stat)
-{
-	int32_t cost = 0;
-	for (int32_t value = 1; value < stat; value++)
-		cost += 2 + (value - 1) / 10;
-	return cost;
+	return static_cast<uint16_t>(cap_value(stat, 1, max_stat));
 }
 
 /// Shrink the six stats evenly until they cost no more than a character of this level has
@@ -596,7 +642,7 @@ static void population_fit_stats_to_level(mmo_charstatus& status, int32_t level)
 	for (int32_t percent = 100; percent > 0; percent -= 5) {
 		int32_t cost = 0;
 		for (const uint16_t* stat : stats)
-			cost += population_stat_cost(std::max(1, *stat * percent / 100));
+			cost += pop_levels::stat_cost(std::max(1, *stat * percent / 100));
 		if (cost <= budget || percent == 5) {
 			for (uint16_t* stat : stats)
 				*stat = static_cast<uint16_t>(std::max(1, *stat * percent / 100));
@@ -1270,7 +1316,9 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 		const uint16_t pre_job_id = party != nullptr ? party->job
 			: (job_hint != UINT16_MAX && pcdb_checkid(job_hint)) ? job_hint : get_random_job_id();
 		PopulationDbSource pre_src = PopulationDbSource::Main;
-		auto pre_equipment = population_engine_find_any(pre_job_id, &pre_src);
+		// a party's place may be a transcendent or third class (pop_party_roll_plan), dressed as its second class
+		auto pre_equipment = party != nullptr ? population_engine_find_line(pre_job_id, &pre_src)
+			: population_engine_find_any(pre_job_id, &pre_src);
 		if (!pre_equipment) {
 			const uint16_t base_job = get_base_job(pre_job_id);
 			if (base_job != pre_job_id)
@@ -1421,7 +1469,7 @@ static size_t autosummon_fill_map(int16_t map_id, size_t want, uint16_t job_hint
 			if (fitted_job != job_id) {
 				job_id = fitted_job;
 				pre_src = PopulationDbSource::Main;
-				equipment = population_engine_find_any(fitted_job, &pre_src);
+				equipment = population_engine_find_line(fitted_job, &pre_src);
 			}
 		}
 
@@ -1726,7 +1774,8 @@ static std::string pop_party_title(const std::string& templ, int16 m, int32_t le
 /// the party's window (g.level_lo-hi) and the class it can be at that level. A member too low for its class
 /// gets the class below it (Priest to Acolyte, Knight to Swordsman), so on a map where second classes start
 /// a party has some, and a slot whose duty needs the class itself is left out: no songs without a Bard, no
-/// Soul Exchange without a Professor, no support from a Novice.
+/// Soul Exchange without a Professor, no support from a Novice. The other slots' second classes may be
+/// transcendent or, high enough, third classes (population_advance_job), a few in Magmarings' 95-110.
 static void pop_party_roll_plan(PopPartyGroup& g, const PopPartyMap& pm)
 {
 	const PopPartyTemplate& tpl = *g.tpl;
@@ -1739,7 +1788,9 @@ static void pop_party_roll_plan(PopPartyGroup& g, const PopPartyMap& pm)
 		const pop_levels::Range window = { g.level_lo, g.level_hi };
 		if (roll < 0)
 			roll = static_cast<int32_t>(rnd() % static_cast<uint32_t>(std::max(1, window.hi - window.lo + 1)));
-		const uint16_t fitted = map_levels ? population_step_down_job(job, window.lo + roll) : job;
+		// a slot whose duty needs its class keeps it; the others go on as players do (a Lord Knight, a Rune Knight)
+		const uint16_t advanced = map_levels && !keep_class ? population_advance_job(job, window.lo + roll) : job;
+		const uint16_t fitted = map_levels ? population_step_down_job(advanced, window.lo + roll) : job;
 		if (fitted != job && keep_class)
 			return -1;
 		PopPartyMember member;
@@ -2660,12 +2711,14 @@ static map_session_data* population_engine_spawn_shell(int16_t map_id, int x, in
 		sd->status.luk = static_cast<uint16_t>(90 + (rnd() % 20));
 	}
 	if (map_base_level >= 0) {
-		sd->status.str  = population_scale_stat(sd->status.str,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->str_min >= 0);
-		sd->status.agi  = population_scale_stat(sd->status.agi,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->agi_min >= 0);
-		sd->status.vit  = population_scale_stat(sd->status.vit,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->vit_min >= 0);
-		sd->status.int_ = population_scale_stat(sd->status.int_, map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->intl_min >= 0);
-		sd->status.dex  = population_scale_stat(sd->status.dex,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->dex_min >= 0);
-		sd->status.luk  = population_scale_stat(sd->status.luk,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->luk_min >= 0);
+		const std::shared_ptr<s_job_info> job_info = job_db.find(sd->status.class_);
+		const auto max_stat = [&job_info](e_params param) { return job_info != nullptr ? static_cast<int32_t>(job_info->max_param[param]) : 99; };
+		sd->status.str  = population_scale_stat(sd->status.str,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->str_min >= 0, max_stat(PARAM_STR));
+		sd->status.agi  = population_scale_stat(sd->status.agi,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->agi_min >= 0, max_stat(PARAM_AGI));
+		sd->status.vit  = population_scale_stat(sd->status.vit,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->vit_min >= 0, max_stat(PARAM_VIT));
+		sd->status.int_ = population_scale_stat(sd->status.int_, map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->intl_min >= 0, max_stat(PARAM_INT));
+		sd->status.dex  = population_scale_stat(sd->status.dex,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->dex_min >= 0, max_stat(PARAM_DEX));
+		sd->status.luk  = population_scale_stat(sd->status.luk,  map_base_level, pop_cfg, pop_cfg != nullptr && pop_cfg->luk_min >= 0, max_stat(PARAM_LUK));
 		population_fit_stats_to_level(sd->status, map_base_level);
 	}
 
@@ -3256,6 +3309,12 @@ static map_session_data* population_engine_spawn_shell(int16_t map_id, int x, in
     // Run the full Script: once to execute side-effect commands (setriding, setfalcon, etc.).
     if (init_script != nullptr)
         run_script(init_script, 0, sd->id, fake_nd->id);
+    // nostalRE: a third class rides its own mount. A Rune Knight has its Knight's Script, whose Peco is a
+    // dragon for it; a Mechanic's skills need its Mado Gear, which the Blacksmith's Script does not give.
+    if ((sd->class_ & MAPID_THIRDMASK) == MAPID_RUNE_KNIGHT && pc_isriding(sd))
+        pc_setoption(sd, (sd->sc.option & ~OPTION_RIDING) | OPTION_DRAGON1);
+    if ((sd->class_ & MAPID_THIRDMASK) == MAPID_MECHANIC)
+        pc_setoption(sd, sd->sc.option | OPTION_MADOGEAR, MADO_ROBOT);
 
     // Register the filtered Script: (side-effect commands stripped) as a persistent
     // bonus_script so bonus commands survive every future status_calc_pc call.
