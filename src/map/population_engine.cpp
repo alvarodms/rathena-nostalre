@@ -1751,13 +1751,23 @@ static void pop_party_roll_plan(PopPartyGroup& g, const PopPartyMap& pm)
 			population_class_level_range(fitted, floor_level, cap);
 			member.level = pop_levels::member_level(window, roll, { floor_level, cap });
 		}
-		// a skill set is for the class it was written for (and its transcendent): a slot of Priests and
-		// Acolytes names one of each, and each member takes its own
+		// a skill set is for the class it was written for: a slot of Priests and Acolytes names one of each, and
+		// each member takes the closest to its class — its own, then its transcendent (or the class it is the
+		// transcendent of), then its line's. A Paladin takes paladin_camp over crusader_camp; a Royal Guard
+		// with no set of its own takes its line's.
+		const uint64 mine = pc_jobid2mapid(fitted);
+		int best = 0;
 		for (const std::string& set : skill_sets) {
 			const uint16_t set_job = population_skill_db().set_job(set);
-			if (set_job != 0 && (pc_jobid2mapid(fitted) & MAPID_SECONDMASK) == (pc_jobid2mapid(set_job) & MAPID_SECONDMASK)) {
+			if (set_job == 0)
+				continue;
+			const uint64 theirs = pc_jobid2mapid(set_job);
+			const int score = theirs == mine ? 3
+				: (theirs & ~static_cast<uint64>(JOBL_UPPER)) == (mine & ~static_cast<uint64>(JOBL_UPPER)) ? 2
+				: (theirs & MAPID_SECONDMASK) == (mine & MAPID_SECONDMASK) ? 1 : 0;
+			if (score > best) {
+				best = score;
 				member.skill_set = set;
-				break;
 			}
 		}
 		for (const std::string& build : slot.builds) {
